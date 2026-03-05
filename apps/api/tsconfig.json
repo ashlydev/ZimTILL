@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": false,
+    "types": ["node", "vitest/globals"],
+    "paths": {
+      "@novoriq/shared": ["../../packages/shared/src"],
+      "@novoriq/shared/*": ["../../packages/shared/src/*"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["src/tests"]
+}

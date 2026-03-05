@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["jest", "react", "react-native"],
+    "paths": {
+      "@novoriq/shared": ["../../packages/shared/src"],
+      "@novoriq/shared/*": ["../../packages/shared/src/*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx", "jest.setup.ts"]
+}

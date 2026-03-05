@@ -1,0 +1,295 @@
+import { createHash, randomUUID } from "node:crypto";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { Paynow } from "paynow";
+import { paynowInitiateSchema, paynowStatusSchema, PaynowMethod, PaynowNormalizedStatus } from "@novoriq/shared";
+import { env } from "../../config/env";
+import { HttpError } from "../../lib/http";
+import { updateOrderPaymentStatus } from "../orders/order-utils";
+
+function requirePaynowClient(): Paynow {
+  if (
+    !env.PAYNOW_INTEGRATION_ID ||
+    !env.PAYNOW_INTEGRATION_KEY ||
+    !env.PAYNOW_RESULT_URL ||
+    !env.PAYNOW_RETURN_URL
+  ) {
+    throw new HttpError(500, "Paynow environment variables are not fully configured");
+  }
+
+  return new Paynow(
+    env.PAYNOW_INTEGRATION_ID,
+    env.PAYNOW_INTEGRATION_KEY,
+    env.PAYNOW_RESULT_URL,
+    env.PAYNOW_RETURN_URL
+  );
+}
+
+function normalizeStatus(rawStatus: string | undefined, paidFlag?: boolean): PaynowNormalizedStatus {
+  if (paidFlag) return "PAID";
+  const status = (rawStatus ?? "").toLowerCase();
+
+  if (["paid", "awaiting delivery"].some((item) => status.includes(item))) return "PAID";
+  if (["created", "sent", "awaiting", "pending", "queued"].some((item) => status.includes(item))) return "AWAITING";
+  if (["cancelled", "canceled"].some((item) => status.includes(item))) return "CANCELLED";
+  if (["failed", "error", "rejected"].some((item) => status.includes(item))) return "FAILED";
+
+  return "UNKNOWN";
+}
+
+function paymentInstructions(method: PaynowMethod): string {
+  if (method === "ecocash" || method === "onemoney") {
+    return "Approve the mobile money prompt on your phone, then tap Check payment status.";
+  }
+  if (method === "web" || method === "card") {
+    return "Complete checkout in the opened browser, then return and sync or check status.";
+  }
+  return "Follow Paynow payment instructions and check status after completion.";
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function toJsonValue(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+async function applyPaidStatus(prisma: PrismaClient, merchantId: string, transactionId: string, deviceId = "server-sync") {
+  const txn = await prisma.paynowTransaction.findFirst({
+    where: { id: transactionId, merchantId, deletedAt: null }
+  });
+
+  if (!txn) {
+    throw new HttpError(404, "Transaction not found");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const pendingPayment = await tx.payment.findFirst({
+      where: {
+        merchantId,
+        orderId: txn.orderId,
+        paynowTransactionId: txn.id,
+        deletedAt: null
+      }
+    });
+
+    if (pendingPayment) {
+      await tx.payment.update({
+        where: { id: pendingPayment.id },
+        data: {
+          status: "CONFIRMED",
+          method: "PAYNOW",
+          updatedAt: new Date(),
+          version: { increment: 1 },
+          lastModifiedByDeviceId: deviceId
+        }
+      });
+    } else {
+      const now = new Date();
+      await tx.payment.create({
+        data: {
+          id: randomUUID(),
+          merchantId,
+          orderId: txn.orderId,
+          amount: txn.amount,
+          method: "PAYNOW",
+          reference: txn.reference,
+          paidAt: now,
+          status: "CONFIRMED",
+          paynowTransactionId: txn.id,
+          createdAt: now,
+          updatedAt: now,
+          version: 1,
+          lastModifiedByDeviceId: deviceId
+        }
+      });
+    }
+
+    await tx.paynowTransaction.update({
+      where: { id: txn.id },
+      data: { status: "PAID", updatedAt: new Date() }
+    });
+  });
+
+  await updateOrderPaymentStatus(prisma, txn.orderId, merchantId);
+}
+
+export async function initiatePaynow(
+  prisma: PrismaClient,
+  merchantId: string,
+  identifier: string,
+  payload: unknown
+): Promise<{ transactionId: string; pollUrl: string; redirectUrl?: string; instructions: string }> {
+  const body = paynowInitiateSchema.parse(payload);
+  const order = await prisma.order.findFirst({
+    where: {
+      id: body.orderId,
+      merchantId,
+      deletedAt: null
+    }
+  });
+
+  if (!order) {
+    throw new HttpError(404, "Order not found");
+  }
+
+  if (body.amount > Number(order.total)) {
+    throw new HttpError(400, "Payment amount cannot exceed order total");
+  }
+
+  const paynow = requirePaynowClient();
+  const reference = `NVO-${Date.now()}-${Math.floor(100000 + Math.random() * 900000)}`;
+  const payment = paynow.createPayment(reference, identifier.includes("@") ? identifier : undefined);
+  payment.add(`Order ${order.orderNumber}`, body.amount);
+
+  const response =
+    body.method === "ecocash" || body.method === "onemoney"
+      ? await paynow.sendMobile(payment, body.phone ?? "", body.method)
+      : await paynow.send(payment);
+
+  const pollUrl = asString(response.pollUrl);
+  const redirectUrl = asString(response.redirectUrl);
+  const instructionText = asString(response.instructions);
+
+  if (!response.success || !pollUrl) {
+    throw new HttpError(502, `Paynow initiation failed: ${String(response.errors ?? "unknown error")}`);
+  }
+
+  const now = new Date();
+  const transactionId = randomUUID();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.paynowTransaction.create({
+      data: {
+        id: transactionId,
+        merchantId,
+        orderId: order.id,
+        amount: body.amount,
+        method: body.method,
+        phone: body.phone ?? null,
+        reference,
+        pollUrl,
+        redirectUrl: redirectUrl ?? null,
+        status: "CREATED",
+        rawInitResponse: toJsonValue(response),
+        createdAt: now,
+        updatedAt: now
+      }
+    });
+
+    await tx.payment.create({
+      data: {
+        id: randomUUID(),
+        merchantId,
+        orderId: order.id,
+        amount: body.amount,
+        method: "PAYNOW",
+        reference,
+        paidAt: now,
+        status: "PENDING",
+        paynowTransactionId: transactionId,
+        createdAt: now,
+        updatedAt: now,
+        version: 1,
+        lastModifiedByDeviceId: "server-paynow"
+      }
+    });
+  });
+
+  return {
+    transactionId,
+    pollUrl,
+    redirectUrl,
+    instructions: instructionText ?? paymentInstructions(body.method)
+  };
+}
+
+export async function pollPaynowStatus(
+  prisma: PrismaClient,
+  merchantId: string,
+  payload: unknown
+): Promise<{ status: PaynowNormalizedStatus; paynowRaw?: object }> {
+  const body = paynowStatusSchema.parse(payload);
+
+  const txn = await prisma.paynowTransaction.findFirst({
+    where: { id: body.transactionId, merchantId, deletedAt: null }
+  });
+
+  if (!txn) {
+    throw new HttpError(404, "Transaction not found");
+  }
+
+  const paynow = requirePaynowClient();
+  const statusResponse = await paynow.pollTransaction(txn.pollUrl);
+  const normalized = normalizeStatus(
+    typeof statusResponse.status === "string" ? statusResponse.status : undefined,
+    Boolean(statusResponse.paid)
+  );
+
+  await prisma.paynowTransaction.update({
+    where: { id: txn.id },
+    data: {
+      status: normalized,
+      rawLastStatus: toJsonValue(statusResponse),
+      updatedAt: new Date()
+    }
+  });
+
+  if (normalized === "PAID") {
+    await applyPaidStatus(prisma, merchantId, txn.id);
+  }
+
+  return { status: normalized, paynowRaw: statusResponse as Record<string, unknown> };
+}
+
+export function verifyPaynowWebhookSignature(payload: Record<string, unknown>): boolean {
+  if (!env.PAYNOW_INTEGRATION_KEY) return false;
+
+  const provided = String(payload.hash ?? payload.Hash ?? "").toUpperCase();
+  if (!provided) return false;
+
+  const keys = Object.keys(payload)
+    .filter((key) => key.toLowerCase() !== "hash")
+    .sort((a, b) => a.localeCompare(b));
+
+  const concatenated = keys.map((key) => String(payload[key] ?? "")).join("");
+  const generated = createHash("sha512")
+    .update(concatenated + env.PAYNOW_INTEGRATION_KEY)
+    .digest("hex")
+    .toUpperCase();
+
+  return generated === provided;
+}
+
+export async function handlePaynowWebhook(prisma: PrismaClient, payload: Record<string, unknown>): Promise<void> {
+  if (!verifyPaynowWebhookSignature(payload)) {
+    throw new HttpError(401, "Invalid Paynow signature");
+  }
+
+  const reference = String(payload.reference ?? payload.Reference ?? "").trim();
+  if (!reference) {
+    throw new HttpError(400, "Missing Paynow reference");
+  }
+
+  const txn = await prisma.paynowTransaction.findFirst({ where: { reference, deletedAt: null } });
+
+  if (!txn) {
+    throw new HttpError(404, "Referenced transaction not found");
+  }
+
+  const rawStatus = String(payload.status ?? payload.Status ?? "");
+  const normalized = normalizeStatus(rawStatus, String(payload.paid ?? "").toLowerCase() === "true");
+
+  await prisma.paynowTransaction.update({
+    where: { id: txn.id },
+    data: {
+      status: normalized,
+      rawLastStatus: toJsonValue(payload),
+      updatedAt: new Date()
+    }
+  });
+
+  if (normalized === "PAID") {
+    await applyPaidStatus(prisma, txn.merchantId, txn.id, "server-paynow-webhook");
+  }
+}

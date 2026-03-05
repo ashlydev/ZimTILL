@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "Novoriq Orders",
+    "slug": "novoriq-orders",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B1F3B"
+    },
+    "updates": {
+      "enabled": false,
+      "checkAutomatically": "NEVER",
+      "fallbackToCacheTimeout": 0
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.novoriq.orders"
+    },
+    "android": {
+      "package": "com.novoriq.orders",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundImage": "./assets/adaptive-icon-background.png"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/icon.png",
+      "themeColor": "#0B1F3B",
+      "backgroundColor": "#FFFFFF"
+    },
+    "plugins": ["expo-sqlite", "expo-secure-store"],
+    "extra": {
+      "apiBaseUrl": "http://localhost:4000"
+    }
+  }
+}

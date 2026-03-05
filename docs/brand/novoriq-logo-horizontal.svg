@@ -1,0 +1,13 @@
+<svg width="1400" height="400" viewBox="0 0 1400 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="g" cx="40%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#1F3E66"/>
+      <stop offset="100%" stop-color="#0B1F3B"/>
+    </radialGradient>
+  </defs>
+  <circle cx="190" cy="200" r="130" fill="url(#g)"/>
+  <path d="M128 214 L178 264 L268 150" stroke="#F9FAFB" stroke-width="26" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <ellipse cx="168" cy="150" rx="84" ry="38" fill="#FFFFFF" opacity="0.15"/>
+  <text x="360" y="220" fill="#0B1F3B" font-family="'Segoe UI', Arial, sans-serif" font-size="128" font-weight="700">Novoriq</text>
+  <text x="366" y="290" fill="#6B7280" font-family="'Segoe UI', Arial, sans-serif" font-size="52" font-weight="500">Orders</text>
+</svg>

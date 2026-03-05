@@ -1,0 +1,22 @@
+node_modules
+npm-debug.log*
+.DS_Store
+*.log
+
+# Build outputs
+dist
+coverage
+.expo
+web-build
+
+# Env files
+.env
+.env.*
+
+# Android / iOS local
+apps/mobile/android
+apps/mobile/ios
+
+# Misc
+*.tmp
+*.swp
