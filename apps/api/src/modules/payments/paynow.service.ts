@@ -46,6 +46,14 @@ function paymentInstructions(method: PaynowMethod): string {
   return "Follow Paynow payment instructions and check status after completion.";
 }
 
+function statusMessage(status: PaynowNormalizedStatus): string {
+  if (status === "PAID") return "Payment confirmed. Order balance is updated.";
+  if (status === "AWAITING") return "Payment is awaiting customer completion.";
+  if (status === "FAILED") return "Payment failed. Ask customer to retry.";
+  if (status === "CANCELLED") return "Payment was cancelled.";
+  return "Payment status is not yet recognized. Retry shortly.";
+}
+
 function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
@@ -64,7 +72,7 @@ async function applyPaidStatus(prisma: PrismaClient, merchantId: string, transac
   }
 
   await prisma.$transaction(async (tx) => {
-    const pendingPayment = await tx.payment.findFirst({
+    const existingPayment = await tx.payment.findFirst({
       where: {
         merchantId,
         orderId: txn.orderId,
@@ -73,9 +81,9 @@ async function applyPaidStatus(prisma: PrismaClient, merchantId: string, transac
       }
     });
 
-    if (pendingPayment) {
+    if (existingPayment) {
       await tx.payment.update({
-        where: { id: pendingPayment.id },
+        where: { id: existingPayment.id },
         data: {
           status: "CONFIRMED",
           method: "PAYNOW",
@@ -86,23 +94,29 @@ async function applyPaidStatus(prisma: PrismaClient, merchantId: string, transac
       });
     } else {
       const now = new Date();
-      await tx.payment.create({
-        data: {
-          id: randomUUID(),
-          merchantId,
-          orderId: txn.orderId,
-          amount: txn.amount,
-          method: "PAYNOW",
-          reference: txn.reference,
-          paidAt: now,
-          status: "CONFIRMED",
-          paynowTransactionId: txn.id,
-          createdAt: now,
-          updatedAt: now,
-          version: 1,
-          lastModifiedByDeviceId: deviceId
+      try {
+        await tx.payment.create({
+          data: {
+            id: randomUUID(),
+            merchantId,
+            orderId: txn.orderId,
+            amount: txn.amount,
+            method: "PAYNOW",
+            reference: txn.reference,
+            paidAt: now,
+            status: "CONFIRMED",
+            paynowTransactionId: txn.id,
+            createdAt: now,
+            updatedAt: now,
+            version: 1,
+            lastModifiedByDeviceId: deviceId
+          }
+        });
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") {
+          throw error;
         }
-      });
+      }
     }
 
     await tx.paynowTransaction.update({
@@ -208,7 +222,7 @@ export async function pollPaynowStatus(
   prisma: PrismaClient,
   merchantId: string,
   payload: unknown
-): Promise<{ status: PaynowNormalizedStatus; paynowRaw?: object }> {
+): Promise<{ status: PaynowNormalizedStatus; message: string; paynowRaw?: object }> {
   const body = paynowStatusSchema.parse(payload);
 
   const txn = await prisma.paynowTransaction.findFirst({
@@ -239,7 +253,11 @@ export async function pollPaynowStatus(
     await applyPaidStatus(prisma, merchantId, txn.id);
   }
 
-  return { status: normalized, paynowRaw: statusResponse as Record<string, unknown> };
+  return {
+    status: normalized,
+    message: statusMessage(normalized),
+    paynowRaw: statusResponse as Record<string, unknown>
+  };
 }
 
 export function verifyPaynowWebhookSignature(payload: Record<string, unknown>): boolean {

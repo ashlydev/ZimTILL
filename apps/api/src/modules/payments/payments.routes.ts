@@ -5,10 +5,12 @@ import { paymentMethodValues } from "@novoriq/shared";
 import { prisma } from "../../lib/prisma";
 import { asyncHandler, HttpError } from "../../lib/http";
 import { requireAuth } from "../../middleware/auth";
+import { requirePermission } from "../../middleware/permissions";
 import { validateBody } from "../../middleware/validate";
 import { toPlain } from "../../lib/serialization";
 import { updateOrderPaymentStatus } from "../orders/order-utils";
 import { handlePaynowWebhook, initiatePaynow, pollPaynowStatus } from "./paynow.service";
+import { recordAudit } from "../audit/audit.service";
 
 const createPaymentSchema = z.object({
   orderId: z.string().uuid(),
@@ -31,6 +33,7 @@ paymentsRouter.use(requireAuth);
 
 paymentsRouter.get(
   "/",
+  requirePermission("payments.read"),
   asyncHandler(async (req, res) => {
     const payments = await prisma.payment.findMany({
       where: { merchantId: req.user!.merchantId, deletedAt: null },
@@ -43,6 +46,7 @@ paymentsRouter.get(
 
 paymentsRouter.post(
   "/",
+  requirePermission("payments.write"),
   validateBody(createPaymentSchema),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof createPaymentSchema>;
@@ -75,12 +79,20 @@ paymentsRouter.post(
 
     await updateOrderPaymentStatus(prisma, order.id, merchantId);
 
+    await recordAudit(prisma, req.user!, {
+      action: "payment.create",
+      entityType: "Payment",
+      entityId: payment.id,
+      metadata: { method: payment.method, amount: Number(payment.amount) }
+    });
+
     res.status(201).json({ payment: toPlain(payment) });
   })
 );
 
 paymentsRouter.post(
   "/paynow/initiate",
+  requirePermission("payments.write"),
   validateBody(
     z.object({
       orderId: z.string().uuid(),
@@ -91,15 +103,31 @@ paymentsRouter.post(
   ),
   asyncHandler(async (req, res) => {
     const result = await initiatePaynow(prisma, req.user!.merchantId, req.user!.identifier, req.body);
+
+    await recordAudit(prisma, req.user!, {
+      action: "payment.paynowInitiate",
+      entityType: "PaynowTransaction",
+      entityId: result.transactionId
+    });
+
     res.status(201).json(result);
   })
 );
 
 paymentsRouter.post(
   "/paynow/status",
+  requirePermission("payments.write"),
   validateBody(z.object({ transactionId: z.string().uuid() })),
   asyncHandler(async (req, res) => {
     const result = await pollPaynowStatus(prisma, req.user!.merchantId, req.body);
+
+    await recordAudit(prisma, req.user!, {
+      action: "payment.paynowStatus",
+      entityType: "PaynowTransaction",
+      entityId: (req.body as { transactionId: string }).transactionId,
+      metadata: { status: result.status }
+    });
+
     res.json(result);
   })
 );

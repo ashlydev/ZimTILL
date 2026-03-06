@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../../lib/prisma";
 import { asyncHandler } from "../../lib/http";
 import { requireAuth } from "../../middleware/auth";
+import { requirePermission } from "../../middleware/permissions";
 import { toPlain } from "../../lib/serialization";
 
 function startOfDay(date: Date): Date {
@@ -13,6 +14,7 @@ reportsRouter.use(requireAuth);
 
 reportsRouter.get(
   "/summary",
+  requirePermission("reports.read"),
   asyncHandler(async (req, res) => {
     const merchantId = req.user!.merchantId;
     const now = new Date();
@@ -80,6 +82,8 @@ reportsRouter.get(
       .sort((a, b) => b.qty - a.qty)
       .slice(0, 5);
 
+    const isCashier = req.user?.role === "CASHIER";
+
     res.json(
       toPlain({
         salesBasis: "CONFIRMED_PAYMENTS",
@@ -88,9 +92,9 @@ reportsRouter.get(
           ordersCount: todayOrders
         },
         last7Days: {
-          salesTotal: weekSales,
-          ordersCount: weekOrders,
-          topProducts
+          salesTotal: isCashier ? todaySales : weekSales,
+          ordersCount: isCashier ? todayOrders : weekOrders,
+          topProducts: isCashier ? topProducts.slice(0, 3) : topProducts
         }
       })
     );

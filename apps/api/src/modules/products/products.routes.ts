@@ -4,8 +4,10 @@ import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncHandler, HttpError } from "../../lib/http";
 import { requireAuth } from "../../middleware/auth";
+import { requirePermission } from "../../middleware/permissions";
 import { validateBody } from "../../middleware/validate";
 import { toPlain } from "../../lib/serialization";
+import { recordAudit } from "../audit/audit.service";
 
 function getRouteParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
@@ -32,6 +34,7 @@ productsRouter.use(requireAuth);
 
 productsRouter.get(
   "/",
+  requirePermission("products.read"),
   asyncHandler(async (req, res) => {
     const merchantId = req.user!.merchantId;
     const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
@@ -63,6 +66,7 @@ productsRouter.get(
 
 productsRouter.post(
   "/",
+  requirePermission("products.write"),
   validateBody(productCreateSchema),
   asyncHandler(async (req, res) => {
     const merchantId = req.user!.merchantId;
@@ -87,12 +91,19 @@ productsRouter.post(
       }
     });
 
+    await recordAudit(prisma, req.user!, {
+      action: "product.create",
+      entityType: "Product",
+      entityId: product.id
+    });
+
     res.status(201).json({ product: toPlain(product) });
   })
 );
 
 productsRouter.put(
   "/:id",
+  requirePermission("products.write"),
   validateBody(productUpdateSchema),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
@@ -117,12 +128,19 @@ productsRouter.put(
       }
     });
 
+    await recordAudit(prisma, req.user!, {
+      action: "product.update",
+      entityType: "Product",
+      entityId: updated.id
+    });
+
     res.json({ product: toPlain(updated) });
   })
 );
 
 productsRouter.delete(
   "/:id",
+  requirePermission("products.write"),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
     const merchantId = req.user!.merchantId;
@@ -143,12 +161,19 @@ productsRouter.delete(
       }
     });
 
+    await recordAudit(prisma, req.user!, {
+      action: "product.delete",
+      entityType: "Product",
+      entityId: deleted.id
+    });
+
     res.json({ product: toPlain(deleted) });
   })
 );
 
 productsRouter.post(
   "/:id/adjust-stock",
+  requirePermission("inventory.write"),
   validateBody(stockAdjustSchema),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
@@ -194,6 +219,13 @@ productsRouter.post(
       });
 
       return next;
+    });
+
+    await recordAudit(prisma, req.user!, {
+      action: "inventory.adjustStock",
+      entityType: "Product",
+      entityId: updated.id,
+      metadata: { quantity }
     });
 
     res.json({ product: toPlain(updated) });

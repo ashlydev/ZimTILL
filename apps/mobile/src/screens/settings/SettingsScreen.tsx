@@ -1,11 +1,18 @@
 import React, { useCallback, useState } from "react";
-import { Alert, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { Screen } from "../../components/Screen";
 import { Card } from "../../components/Card";
 import { AppButton } from "../../components/AppButton";
 import { colors, spacing } from "../../constants/theme";
 import { useAuth } from "../../contexts/AuthContext";
-import { getFeatureFlags, getSettings, saveSettings, setFeatureFlag } from "../../data/repository";
+import {
+  exportLocalBackup,
+  getFeatureFlags,
+  getSettings,
+  importLocalBackup,
+  saveSettings,
+  setFeatureFlag
+} from "../../data/repository";
 import { useRefreshOnFocus } from "../../hooks/useRefreshOnFocus";
 
 export function SettingsScreen() {
@@ -18,6 +25,7 @@ export function SettingsScreen() {
   const [supportPhone, setSupportPhone] = useState("");
   const [supportEmail, setSupportEmail] = useState("");
   const [flags, setFlags] = useState<Record<string, boolean>>({});
+  const [backupJson, setBackupJson] = useState("");
 
   const load = useCallback(async () => {
     if (!session) return;
@@ -60,6 +68,34 @@ export function SettingsScreen() {
     const enabled = !Boolean(flags[key]);
     await setFeatureFlag({ merchantId: session.merchantId, deviceId: session.deviceId }, key, enabled);
     setFlags((prev) => ({ ...prev, [key]: enabled }));
+  };
+
+  const onExportBackup = async () => {
+    if (!session) return;
+    const backup = await exportLocalBackup(session.merchantId);
+    const text = JSON.stringify(backup, null, 2);
+    setBackupJson(text);
+    await Share.share({
+      title: "Novoriq Backup",
+      message: text
+    });
+  };
+
+  const onImportBackup = async () => {
+    if (!session) return;
+    if (!backupJson.trim()) {
+      Alert.alert("Missing backup", "Paste backup JSON before importing.");
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(backupJson) as Record<string, unknown>;
+      await importLocalBackup({ merchantId: session.merchantId, deviceId: session.deviceId }, parsed);
+      Alert.alert("Imported", "Backup merged into local data.");
+      await load();
+    } catch {
+      Alert.alert("Import failed", "Backup JSON is invalid or unsupported.");
+    }
   };
 
   return (
@@ -110,6 +146,22 @@ export function SettingsScreen() {
         />
         <TextInput style={styles.textInput} value={supportPhone} onChangeText={setSupportPhone} placeholder="Support phone" />
         <TextInput style={styles.textInput} value={supportEmail} onChangeText={setSupportEmail} placeholder="Support email" />
+      </Card>
+
+      <Card>
+        <Text style={styles.sectionTitle}>Backup + Restore (Local)</Text>
+        <Text style={styles.meta}>Export JSON to share/store securely. Import merges backup into local store.</Text>
+        <View style={styles.row}>
+          <AppButton label="Export JSON" onPress={onExportBackup} />
+          <AppButton label="Import JSON" variant="secondary" onPress={onImportBackup} />
+        </View>
+        <TextInput
+          style={[styles.textInput, { minHeight: 120 }]}
+          multiline
+          value={backupJson}
+          onChangeText={setBackupJson}
+          placeholder="Paste backup JSON here to import"
+        />
       </Card>
 
       <Card>

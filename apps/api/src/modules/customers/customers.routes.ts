@@ -4,8 +4,10 @@ import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncHandler, HttpError } from "../../lib/http";
 import { requireAuth } from "../../middleware/auth";
+import { requirePermission } from "../../middleware/permissions";
 import { validateBody } from "../../middleware/validate";
 import { toPlain } from "../../lib/serialization";
+import { recordAudit } from "../audit/audit.service";
 
 function getRouteParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
@@ -24,6 +26,7 @@ customersRouter.use(requireAuth);
 
 customersRouter.get(
   "/",
+  requirePermission("customers.read"),
   asyncHandler(async (req, res) => {
     const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
     const customers = await prisma.customer.findMany({
@@ -48,6 +51,7 @@ customersRouter.get(
 
 customersRouter.post(
   "/",
+  requirePermission("customers.write"),
   validateBody(customerCreateSchema),
   asyncHandler(async (req, res) => {
     const now = new Date();
@@ -67,12 +71,19 @@ customersRouter.post(
       }
     });
 
+    await recordAudit(prisma, req.user!, {
+      action: "customer.create",
+      entityType: "Customer",
+      entityId: customer.id
+    });
+
     res.status(201).json({ customer: toPlain(customer) });
   })
 );
 
 customersRouter.put(
   "/:id",
+  requirePermission("customers.write"),
   validateBody(customerUpdateSchema),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
@@ -96,12 +107,19 @@ customersRouter.put(
       }
     });
 
+    await recordAudit(prisma, req.user!, {
+      action: "customer.update",
+      entityType: "Customer",
+      entityId: updated.id
+    });
+
     res.json({ customer: toPlain(updated) });
   })
 );
 
 customersRouter.delete(
   "/:id",
+  requirePermission("customers.write"),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
     const existing = await prisma.customer.findFirst({
@@ -120,6 +138,12 @@ customersRouter.delete(
         version: { increment: 1 },
         lastModifiedByDeviceId: req.user!.deviceId
       }
+    });
+
+    await recordAudit(prisma, req.user!, {
+      action: "customer.delete",
+      entityType: "Customer",
+      entityId: deleted.id
     });
 
     res.json({ customer: toPlain(deleted) });

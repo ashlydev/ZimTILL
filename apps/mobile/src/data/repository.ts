@@ -999,18 +999,18 @@ export async function saveSettings(
       last_modified_by_device_id = ?
      WHERE merchant_id = ?;`,
     [
-      next.businessName,
-      next.currencyCode,
-      next.currencySymbol,
-      next.paymentInstructions,
-      next.whatsappTemplate,
+      String(next.businessName ?? ""),
+      (next.currencyCode === "ZWL" ? "ZWL" : "USD") as "USD" | "ZWL",
+      String(next.currencySymbol ?? "$"),
+      String(next.paymentInstructions ?? ""),
+      String(next.whatsappTemplate ?? ""),
       next.supportPhone ?? null,
       next.supportEmail ?? null,
-      next.updatedAt,
+      String(next.updatedAt),
       next.version,
-      next.lastModifiedByDeviceId,
+      String(next.lastModifiedByDeviceId),
       context.merchantId
-    ]
+    ] as any[]
   );
 
   const updated = await getSettings(context.merchantId);
@@ -1097,12 +1097,12 @@ async function mergeRow(
   merchantId: string,
   row: Record<string, unknown>,
   columns: string[],
-  values: unknown[]
+  values: any[]
 ): Promise<void> {
   const db = await getDb();
   const existing = await db.getFirstAsync<{ updated_at: string }>(
     `SELECT updated_at FROM ${table} WHERE id = ? AND merchant_id = ?;`,
-    [row.id, merchantId]
+    [String(row.id ?? ""), merchantId]
   );
 
   if (existing && new Date(existing.updated_at).getTime() > new Date(String(row.updatedAt)).getTime()) {
@@ -1117,7 +1117,7 @@ async function mergeRow(
 
   await db.runAsync(
     `INSERT INTO ${table} (${columns.join(",")}) VALUES (${placeholders}) ON CONFLICT(id) DO UPDATE SET ${updates};`,
-    values
+    values as any[]
   );
 }
 
@@ -1416,4 +1416,81 @@ export async function resetLocalData(): Promise<void> {
   await db.execAsync("DELETE FROM payments;");
   await db.execAsync("DELETE FROM stock_movements;");
   await db.execAsync("DELETE FROM settings;");
+}
+
+type LocalBackupPayload = {
+  version: string;
+  exportedAt: string;
+  data: {
+    settings: Record<string, unknown>[];
+    products: Record<string, unknown>[];
+    customers: Record<string, unknown>[];
+    orders: Record<string, unknown>[];
+    orderItems: Record<string, unknown>[];
+    payments: Record<string, unknown>[];
+    stockMovements: Record<string, unknown>[];
+    featureFlags: Record<string, unknown>[];
+  };
+};
+
+async function selectAsCamel(sql: string, params: any[]): Promise<Record<string, unknown>[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<Record<string, unknown>>(sql, params as any[]);
+  return rows.map((row) => toCamel(row));
+}
+
+function forceMerchant(rows: Record<string, unknown>[], merchantId: string): Record<string, unknown>[] {
+  return rows.map((row) => ({
+    ...row,
+    merchantId
+  }));
+}
+
+export async function exportLocalBackup(merchantId: string): Promise<LocalBackupPayload> {
+  const [settings, products, customers, orders, orderItems, payments, stockMovements, featureFlags] = await Promise.all([
+    selectAsCamel("SELECT * FROM settings WHERE merchant_id = ? AND deleted_at IS NULL;", [merchantId]),
+    selectAsCamel("SELECT * FROM products WHERE merchant_id = ? AND deleted_at IS NULL;", [merchantId]),
+    selectAsCamel("SELECT * FROM customers WHERE merchant_id = ? AND deleted_at IS NULL;", [merchantId]),
+    selectAsCamel("SELECT * FROM orders WHERE merchant_id = ? AND deleted_at IS NULL;", [merchantId]),
+    selectAsCamel("SELECT * FROM order_items WHERE merchant_id = ? AND deleted_at IS NULL;", [merchantId]),
+    selectAsCamel("SELECT * FROM payments WHERE merchant_id = ? AND deleted_at IS NULL;", [merchantId]),
+    selectAsCamel("SELECT * FROM stock_movements WHERE merchant_id = ? AND deleted_at IS NULL;", [merchantId]),
+    selectAsCamel("SELECT * FROM feature_flags WHERE merchant_id = ?;", [merchantId])
+  ]);
+
+  return {
+    version: "2.0.0-local",
+    exportedAt: nowIso(),
+    data: {
+      settings,
+      products,
+      customers,
+      orders,
+      orderItems,
+      payments,
+      stockMovements,
+      featureFlags
+    }
+  };
+}
+
+export async function importLocalBackup(context: SessionContext, backup: Record<string, unknown>): Promise<void> {
+  const data = (backup.data ?? backup) as Record<string, unknown>;
+
+  const changes: SyncPullResponse["changes"] = {
+    products: forceMerchant(Array.isArray(data.products) ? (data.products as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["products"],
+    customers: forceMerchant(Array.isArray(data.customers) ? (data.customers as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["customers"],
+    orders: forceMerchant(Array.isArray(data.orders) ? (data.orders as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["orders"],
+    orderItems: forceMerchant(Array.isArray(data.orderItems) ? (data.orderItems as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["orderItems"],
+    payments: forceMerchant(Array.isArray(data.payments) ? (data.payments as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["payments"],
+    stockMovements: forceMerchant(
+      Array.isArray(data.stockMovements) ? (data.stockMovements as Record<string, unknown>[]) : [],
+      context.merchantId
+    ) as SyncPullResponse["changes"]["stockMovements"],
+    settings: forceMerchant(Array.isArray(data.settings) ? (data.settings as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["settings"],
+    featureFlags: Array.isArray(data.featureFlags) ? (data.featureFlags as SyncPullResponse["changes"]["featureFlags"]) : []
+  };
+
+  await applySyncChanges(context.merchantId, changes);
+  await setSyncState({ lastError: null });
 }

@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, RoleType } from "@prisma/client";
 import { registerSchema } from "@novoriq/shared";
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../../lib/http";
@@ -17,6 +17,61 @@ const defaultFeatureFlags = [
   "v2.subscriptionBilling"
 ];
 
+type UserAuthClient = Pick<PrismaClient, "userAuth">;
+
+async function upsertLegacyUserAuth(prisma: UserAuthClient, input: { merchantId: string; userId: string; identifier: string; pinHash: string }) {
+  await prisma.userAuth.upsert({
+    where: {
+      merchantId_identifier: {
+        merchantId: input.merchantId,
+        identifier: input.identifier
+      }
+    },
+    create: {
+      id: randomUUID(),
+      merchantId: input.merchantId,
+      userId: input.userId,
+      identifier: input.identifier,
+      pinHash: input.pinHash
+    },
+    update: {
+      userId: input.userId,
+      pinHash: input.pinHash,
+      updatedAt: new Date(),
+      deletedAt: null
+    }
+  });
+}
+
+type RoleClient = Pick<PrismaClient, "role">;
+
+async function ensureRole(tx: RoleClient, merchantId: string, role: RoleType) {
+  const key = role;
+  const name = role.charAt(0) + role.slice(1).toLowerCase();
+
+  return tx.role.upsert({
+    where: {
+      merchantId_key: {
+        merchantId,
+        key
+      }
+    },
+    create: {
+      id: randomUUID(),
+      merchantId,
+      key,
+      name,
+      description: `${name} role`
+    },
+    update: {
+      name,
+      description: `${name} role`,
+      updatedAt: new Date(),
+      deletedAt: null
+    }
+  });
+}
+
 export async function register(
   prisma: PrismaClient,
   input: unknown,
@@ -27,7 +82,7 @@ export async function register(
   user: Record<string, unknown>;
 }> {
   const { businessName, identifier, pin } = registerSchema.parse(input);
-  const exists = await prisma.userAuth.findFirst({ where: { identifier, deletedAt: null } });
+  const exists = await prisma.user.findFirst({ where: { identifier, deletedAt: null } });
 
   if (exists) {
     throw new HttpError(409, "Account already exists for this identifier");
@@ -35,7 +90,6 @@ export async function register(
 
   const now = new Date();
   const merchantId = randomUUID();
-  const roleId = randomUUID();
   const userId = randomUUID();
   const pinHash = await bcrypt.hash(pin, 10);
 
@@ -49,35 +103,27 @@ export async function register(
       }
     });
 
-    await tx.role.create({
-      data: {
-        id: roleId,
-        merchantId,
-        key: "OWNER",
-        name: "Owner",
-        description: "Primary account owner"
-      }
-    });
+    const ownerRole = await ensureRole(tx as unknown as RoleClient, merchantId, "OWNER");
+    await ensureRole(tx as unknown as RoleClient, merchantId, "MANAGER");
+    await ensureRole(tx as unknown as RoleClient, merchantId, "CASHIER");
 
     const user = await tx.user.create({
       data: {
         id: userId,
         merchantId,
-        roleId,
+        roleId: ownerRole.id,
         identifier,
         pinHash,
-        role: "OWNER"
+        role: "OWNER",
+        isActive: true
       }
     });
 
-    await tx.userAuth.create({
-      data: {
-        id: randomUUID(),
-        merchantId,
-        userId,
-        identifier,
-        pinHash
-      }
+    await upsertLegacyUserAuth(tx as unknown as PrismaClient, {
+      merchantId,
+      userId,
+      identifier,
+      pinHash
     });
 
     await tx.device.create({
@@ -157,16 +203,22 @@ export async function login(
   merchant: Record<string, unknown>;
   user: Record<string, unknown>;
 }> {
-  const auth = await prisma.userAuth.findFirst({
-    where: { identifier: args.identifier, deletedAt: null },
-    include: { user: true, merchant: true }
+  const user = await prisma.user.findFirst({
+    where: {
+      identifier: args.identifier,
+      deletedAt: null,
+      isActive: true
+    },
+    include: {
+      merchant: true
+    }
   });
 
-  if (!auth || auth.user.deletedAt) {
+  if (!user) {
     throw new HttpError(401, "Invalid credentials");
   }
 
-  const isValid = await bcrypt.compare(args.pin, auth.pinHash);
+  const isValid = await bcrypt.compare(args.pin, user.pinHash);
 
   if (!isValid) {
     throw new HttpError(401, "Invalid credentials");
@@ -175,29 +227,36 @@ export async function login(
   await prisma.device.upsert({
     where: {
       merchantId_deviceId: {
-        merchantId: auth.merchantId,
+        merchantId: user.merchantId,
         deviceId: args.deviceId
       }
     },
     create: {
       id: randomUUID(),
-      merchantId: auth.merchantId,
-      userId: auth.userId,
+      merchantId: user.merchantId,
+      userId: user.id,
       deviceId: args.deviceId,
       lastSeenAt: new Date()
     },
     update: {
-      userId: auth.userId,
+      userId: user.id,
       lastSeenAt: new Date(),
       revokedAt: null,
       deletedAt: null
     }
   });
 
+  await upsertLegacyUserAuth(prisma, {
+    merchantId: user.merchantId,
+    userId: user.id,
+    identifier: user.identifier,
+    pinHash: user.pinHash
+  });
+
   await prisma.auditLog.create({
     data: {
-      merchantId: auth.merchantId,
-      userId: auth.userId,
+      merchantId: user.merchantId,
+      userId: user.id,
       action: "auth.login",
       entityType: "Device",
       metadata: { deviceId: args.deviceId }
@@ -205,17 +264,17 @@ export async function login(
   });
 
   const token = signToken({
-    userId: auth.userId,
-    merchantId: auth.merchantId,
-    role: auth.user.role,
-    identifier: auth.identifier,
+    userId: user.id,
+    merchantId: user.merchantId,
+    role: user.role,
+    identifier: user.identifier,
     deviceId: args.deviceId
   });
 
   return {
     token,
-    merchant: toPlain(auth.merchant),
-    user: toPlain(auth.user)
+    merchant: toPlain(user.merchant),
+    user: toPlain(user)
   };
 }
 
@@ -224,4 +283,11 @@ export async function logout(prisma: PrismaClient, merchantId: string, deviceId:
     where: { merchantId, deviceId },
     data: { revokedAt: new Date(), updatedAt: new Date() }
   });
+}
+
+export async function syncLegacyUserAuth(
+  prisma: UserAuthClient,
+  input: { merchantId: string; userId: string; identifier: string; pinHash: string }
+): Promise<void> {
+  await upsertLegacyUserAuth(prisma, input);
 }

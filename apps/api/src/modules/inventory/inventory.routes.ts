@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../../lib/prisma";
 import { asyncHandler } from "../../lib/http";
 import { requireAuth } from "../../middleware/auth";
+import { requirePermission } from "../../middleware/permissions";
 import { toPlain } from "../../lib/serialization";
 
 export const inventoryRouter = Router();
@@ -9,6 +10,7 @@ inventoryRouter.use(requireAuth);
 
 inventoryRouter.get(
   "/movements",
+  requirePermission("inventory.read"),
   asyncHandler(async (req, res) => {
     const movements = await prisma.stockMovement.findMany({
       where: {
@@ -26,6 +28,7 @@ inventoryRouter.get(
 
 inventoryRouter.get(
   "/low-stock",
+  requirePermission("inventory.read"),
   asyncHandler(async (req, res) => {
     const products = await prisma.product.findMany({
       where: {

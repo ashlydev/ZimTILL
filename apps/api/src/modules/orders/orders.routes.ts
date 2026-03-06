@@ -4,9 +4,11 @@ import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncHandler, HttpError } from "../../lib/http";
 import { requireAuth } from "../../middleware/auth";
+import { requirePermission } from "../../middleware/permissions";
 import { validateBody } from "../../middleware/validate";
 import { toPlain } from "../../lib/serialization";
 import { formatCurrency, updateOrderPaymentStatus } from "./order-utils";
+import { recordAudit } from "../audit/audit.service";
 
 function getRouteParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
@@ -33,6 +35,7 @@ ordersRouter.use(requireAuth);
 
 ordersRouter.get(
   "/",
+  requirePermission("orders.read"),
   asyncHandler(async (req, res) => {
     const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
     const orders = await prisma.order.findMany({
@@ -58,6 +61,7 @@ ordersRouter.get(
 
 ordersRouter.post(
   "/",
+  requirePermission("orders.write"),
   validateBody(createOrderSchema),
   asyncHandler(async (req, res) => {
     const merchantId = req.user!.merchantId;
@@ -136,12 +140,23 @@ ordersRouter.post(
       return order;
     });
 
+    await recordAudit(prisma, req.user!, {
+      action: "order.create",
+      entityType: "Order",
+      entityId: created.id,
+      metadata: {
+        status: created.status,
+        total: Number(created.total)
+      }
+    });
+
     res.status(201).json({ order: toPlain(created) });
   })
 );
 
 ordersRouter.get(
   "/:id",
+  requirePermission("orders.read"),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
     const order = await prisma.order.findFirst({
@@ -173,6 +188,7 @@ ordersRouter.get(
 
 ordersRouter.put(
   "/:id",
+  requirePermission("orders.manage"),
   validateBody(updateOrderSchema),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
@@ -195,12 +211,20 @@ ordersRouter.put(
       }
     });
 
+    await recordAudit(prisma, req.user!, {
+      action: "order.update",
+      entityType: "Order",
+      entityId: updated.id,
+      metadata: { status: updated.status }
+    });
+
     res.json({ order: toPlain(updated) });
   })
 );
 
 ordersRouter.post(
   "/:id/confirm",
+  requirePermission("orders.manage"),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
     const merchantId = req.user!.merchantId;
@@ -268,12 +292,20 @@ ordersRouter.post(
       return next;
     });
 
+    await recordAudit(prisma, req.user!, {
+      action: "order.confirm",
+      entityType: "Order",
+      entityId: confirmed.id,
+      metadata: { status: confirmed.status }
+    });
+
     res.json({ order: toPlain(confirmed) });
   })
 );
 
 ordersRouter.post(
   "/:id/cancel",
+  requirePermission("orders.manage"),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
     const merchantId = req.user!.merchantId;
@@ -344,12 +376,20 @@ ordersRouter.post(
       return next;
     });
 
+    await recordAudit(prisma, req.user!, {
+      action: "order.cancel",
+      entityType: "Order",
+      entityId: cancelled.id,
+      metadata: { status: cancelled.status }
+    });
+
     res.json({ order: toPlain(cancelled) });
   })
 );
 
 ordersRouter.post(
   "/:id/recalculate-status",
+  requirePermission("orders.manage"),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
     await updateOrderPaymentStatus(prisma, id, req.user!.merchantId);
@@ -362,6 +402,7 @@ ordersRouter.post(
 
 ordersRouter.get(
   "/:id/share-text",
+  requirePermission("orders.read"),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
     const merchantId = req.user!.merchantId;
@@ -407,5 +448,86 @@ ordersRouter.get(
       .replace("{paymentInstructions}", settings.paymentInstructions);
 
     res.json({ message });
+  })
+);
+
+ordersRouter.get(
+  "/:id/receipt",
+  requirePermission("orders.read"),
+  asyncHandler(async (req, res) => {
+    const id = getRouteParam(req.params.id);
+    const merchantId = req.user!.merchantId;
+
+    const [merchant, settings, order] = await Promise.all([
+      prisma.merchant.findUnique({ where: { id: merchantId } }),
+      prisma.settings.findFirst({ where: { merchantId, deletedAt: null } }),
+      prisma.order.findFirst({
+        where: { id, merchantId, deletedAt: null },
+        include: {
+          customer: true,
+          items: {
+            where: { deletedAt: null },
+            include: { product: true }
+          },
+          payments: {
+            where: { deletedAt: null },
+            orderBy: { paidAt: "asc" }
+          },
+          paynowTransactions: {
+            where: { deletedAt: null },
+            orderBy: { updatedAt: "desc" },
+            take: 1
+          }
+        }
+      })
+    ]);
+
+    if (!order || !settings || !merchant) {
+      throw new HttpError(404, "Order, merchant, or settings not found");
+    }
+
+    const paid = order.payments
+      .filter((payment) => payment.status === "CONFIRMED")
+      .reduce((sum, payment) => sum + Number(payment.amount), 0);
+    const balance = Number(order.total) - paid;
+    const receiptNumber = `RCPT-${order.orderNumber}`;
+
+    res.json({
+      receipt: toPlain({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        receiptNumber,
+        dateTime: order.updatedAt,
+        businessName: settings.businessName || merchant.name,
+        logoPlaceholder: "NOVORIQ",
+        customerName: order.customer?.name ?? "Walk-in",
+        items: order.items.map((item) => ({
+          id: item.id,
+          name: item.product.name,
+          quantity: Number(item.quantity),
+          unitPrice: Number(item.unitPrice),
+          lineTotal: Number(item.lineTotal)
+        })),
+        totals: {
+          subtotal: Number(order.subtotal),
+          discountAmount: Number(order.discountAmount),
+          discountPercent: Number(order.discountPercent),
+          total: Number(order.total),
+          paid,
+          balance
+        },
+        payments: order.payments.map((payment) => ({
+          id: payment.id,
+          method: payment.method,
+          amount: Number(payment.amount),
+          reference: payment.reference,
+          status: payment.status,
+          paidAt: payment.paidAt
+        })),
+        paynowStatus: order.paynowTransactions[0]?.status ?? null,
+        qrPayload: order.id,
+        currencySymbol: settings.currencySymbol
+      })
+    });
   })
 );

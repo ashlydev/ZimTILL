@@ -60,6 +60,20 @@ export function createInMemoryPrisma() {
       create: async ({ data }: AnyRecord) => {
         roles.push({ ...data, createdAt: new Date(), updatedAt: new Date() });
         return roles[roles.length - 1];
+      },
+      upsert: async ({ where, create, update }: AnyRecord) => {
+        const existing = roles.find(
+          (item) => item.merchantId === where.merchantId_key.merchantId && item.key === where.merchantId_key.key
+        );
+
+        if (existing) {
+          Object.assign(existing, update, { updatedAt: new Date() });
+          return existing;
+        }
+
+        const next = { ...create, createdAt: new Date(), updatedAt: new Date(), deletedAt: null };
+        roles.push(next);
+        return next;
       }
     },
     user: {
@@ -67,7 +81,15 @@ export function createInMemoryPrisma() {
         users.push({ ...data, createdAt: new Date(), updatedAt: new Date(), deletedAt: null });
         return users[users.length - 1];
       },
-      findFirst: async ({ where }: AnyRecord) => findByWhere(users, where)
+      findFirst: async ({ where, include }: AnyRecord) => {
+        const item = findByWhere(users, where);
+        if (!item) return null;
+        if (!include) return item;
+        return {
+          ...item,
+          merchant: include.merchant ? merchants.find((m) => m.id === item.merchantId) : undefined
+        };
+      }
     },
     userAuth: {
       findFirst: async ({ where, include }: AnyRecord) => {
@@ -83,6 +105,22 @@ export function createInMemoryPrisma() {
       create: async ({ data }: AnyRecord) => {
         userAuths.push({ ...data, createdAt: new Date(), updatedAt: new Date(), deletedAt: null });
         return userAuths[userAuths.length - 1];
+      },
+      upsert: async ({ where, create, update }: AnyRecord) => {
+        const existing = userAuths.find(
+          (item) =>
+            item.merchantId === where.merchantId_identifier.merchantId &&
+            item.identifier === where.merchantId_identifier.identifier
+        );
+
+        if (existing) {
+          Object.assign(existing, update, { updatedAt: new Date() });
+          return existing;
+        }
+
+        const next = { ...create, createdAt: new Date(), updatedAt: new Date(), deletedAt: null };
+        userAuths.push(next);
+        return next;
       }
     },
     device: {

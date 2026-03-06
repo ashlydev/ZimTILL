@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncHandler } from "../../lib/http";
 import { requireAuth } from "../../middleware/auth";
+import { requirePermission } from "../../middleware/permissions";
 import { validateBody } from "../../middleware/validate";
 import { toPlain } from "../../lib/serialization";
 
@@ -16,6 +17,7 @@ flagsRouter.use(requireAuth);
 
 flagsRouter.get(
   "/",
+  requirePermission("settings.read"),
   asyncHandler(async (req, res) => {
     const flags = await prisma.featureFlag.findMany({
       where: {
@@ -31,6 +33,7 @@ flagsRouter.get(
 
 flagsRouter.put(
   "/",
+  requirePermission("settings.write"),
   validateBody(updateFlagSchema),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof updateFlagSchema>;
