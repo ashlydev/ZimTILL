@@ -58,6 +58,18 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function extractProviderError(error: unknown): string {
+  if (error instanceof HttpError) {
+    return error.message;
+  }
+
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return "Paynow request failed";
+}
+
 function toJsonValue(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
@@ -156,17 +168,22 @@ export async function initiatePaynow(
   const payment = paynow.createPayment(reference, identifier.includes("@") ? identifier : undefined);
   payment.add(`Order ${order.orderNumber}`, body.amount);
 
-  const response =
-    body.method === "ecocash" || body.method === "onemoney"
-      ? await paynow.sendMobile(payment, body.phone ?? "", body.method)
-      : await paynow.send(payment);
+  let response: Record<string, unknown>;
+  try {
+    response =
+      body.method === "ecocash" || body.method === "onemoney"
+        ? (await paynow.sendMobile(payment, body.phone ?? "", body.method)) as Record<string, unknown>
+        : (await paynow.send(payment)) as Record<string, unknown>;
+  } catch (error) {
+    throw new HttpError(400, extractProviderError(error));
+  }
 
   const pollUrl = asString(response.pollUrl);
   const redirectUrl = asString(response.redirectUrl);
   const instructionText = asString(response.instructions);
 
   if (!response.success || !pollUrl) {
-    throw new HttpError(502, `Paynow initiation failed: ${String(response.errors ?? "unknown error")}`);
+    throw new HttpError(400, `Paynow initiation failed: ${String(response.errors ?? "unknown error")}`);
   }
 
   const now = new Date();
