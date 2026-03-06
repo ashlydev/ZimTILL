@@ -135,13 +135,13 @@ Build Command (copy exactly):
 ```bash
 npm install &&
 npm run prisma:generate --workspace @novoriq/api &&
-npm run build --workspace @novoriq/api &&
-npm run prisma:migrate:deploy --workspace @novoriq/api
+npm run build --workspace @novoriq/api
 ```
 
 Start Command (copy exactly):
 
 ```bash
+npm run prisma:migrate:deploy --workspace @novoriq/api &&
 npm run start --workspace @novoriq/api
 ```
 
@@ -168,6 +168,14 @@ Required Render environment variables:
 - `PAYNOW_RESULT_URL`
 - `PAYNOW_RETURN_URL`
 - `PAYNOW_TEST_MODE`
+
+`DATABASE_URL` format for Render Postgres:
+
+```env
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require
+```
+
+Use the connection string directly from your Render Postgres service. If password includes special characters, keep the exact URL Render provides (already encoded).
 
 ## API Endpoints
 
