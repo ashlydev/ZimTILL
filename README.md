@@ -135,13 +135,13 @@ Build Command (copy exactly):
 ```bash
 npm install &&
 npm run prisma:generate --workspace @novoriq/api &&
-npm run build --workspace @novoriq/api
+npm run build --workspace @novoriq/api &&
+npm run prisma:migrate:deploy --workspace @novoriq/api
 ```
 
 Start Command (copy exactly):
 
 ```bash
-npm run prisma:migrate:deploy --workspace @novoriq/api &&
 npm run start --workspace @novoriq/api
 ```
 

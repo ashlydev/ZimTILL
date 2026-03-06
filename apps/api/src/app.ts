@@ -30,7 +30,7 @@ export function createApp() {
   app.use(apiRouter);
 
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok", service: "novoriq-orders-api", time: new Date().toISOString() });
+    res.json({ ok: true, service: "novoriq-orders-api", time: new Date().toISOString() });
   });
 
   app.use(notFound);
