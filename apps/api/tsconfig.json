@@ -4,7 +4,7 @@
     "rootDir": "src",
     "outDir": "dist",
     "strict": false,
-    "types": ["node", "vitest/globals"],
+    "types": ["node"],
     "paths": {
       "@novoriq/shared": ["../../packages/shared/src"],
       "@novoriq/shared/*": ["../../packages/shared/src/*"]
