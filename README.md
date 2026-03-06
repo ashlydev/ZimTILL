@@ -122,6 +122,53 @@ Troubleshooting:
 - `npm run build:api`
 - `npm run build:android-apk`
 
+## Render Deployment (API)
+
+Render settings:
+
+- Root Directory: leave blank (repo root)
+- Runtime: Node
+- Node version: 20.x
+
+Build Command (copy exactly):
+
+```bash
+npm install &&
+npm run prisma:generate --workspace @novoriq/api &&
+npm run build --workspace @novoriq/api &&
+npm run prisma:migrate:deploy --workspace @novoriq/api
+```
+
+Start Command (copy exactly):
+
+```bash
+npm run start --workspace @novoriq/api
+```
+
+Dist output troubleshooting (verify start target exists):
+
+```bash
+npm run build --workspace @novoriq/api
+ls -la apps/api/dist
+```
+
+Expected start file:
+
+`apps/api/dist/server.js`
+
+Required Render environment variables:
+
+- `DATABASE_URL`
+- `NODE_ENV=production`
+- `JWT_SECRET`
+- `JWT_EXPIRES_IN`
+- `CORS_ORIGIN`
+- `PAYNOW_INTEGRATION_ID`
+- `PAYNOW_INTEGRATION_KEY`
+- `PAYNOW_RESULT_URL`
+- `PAYNOW_RETURN_URL`
+- `PAYNOW_TEST_MODE`
+
 ## API Endpoints
 
 ### Auth
