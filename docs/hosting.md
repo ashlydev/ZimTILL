@@ -26,6 +26,11 @@ PAYNOW_RETURN_URL=https://yourdomain.com/paynow/return
 PAYNOW_TEST_MODE=false
 ```
 
+If Render logs show `Node.js v25.x` and `npm run start` fails, force Node 20:
+
+- Set `NODE_VERSION=20.18.0` in Render environment variables.
+- Or use the included `.node-version` and `render.yaml`.
+
 ## 2. Build and Validate Before Deploy
 
 From repository root:
@@ -88,4 +93,3 @@ npm run build:android-apk
 - [ ] Paynow live mode works for a real payment.
 - [ ] API logs monitored for sync and payment failures.
 - [ ] APK version incremented for each release.
-

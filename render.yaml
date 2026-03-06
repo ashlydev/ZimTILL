@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: zimtill-api
+    env: node
+    plan: starter
+    rootDir: .
+    buildCommand: npm ci && npm run build:api && npm run prisma:generate --workspace @novoriq/api && npm run prisma:migrate:deploy --workspace @novoriq/api
+    startCommand: npm run start --workspace @novoriq/api
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: CORS_ORIGIN
+        sync: false
+      - key: PAYNOW_INTEGRATION_ID
+        sync: false
+      - key: PAYNOW_INTEGRATION_KEY
+        sync: false
+      - key: PAYNOW_RESULT_URL
+        sync: false
+      - key: PAYNOW_RETURN_URL
+        sync: false
+      - key: PAYNOW_TEST_MODE
+        value: "false"
