@@ -132,6 +132,7 @@ const rolePermissions: Record<AuthTokenPayload["role"], Set<AppPermission>> = {
     "customers.read",
     "orders.read",
     "orders.write",
+    "orders.manage",
     "payments.read",
     "payments.write",
     "reports.read",
