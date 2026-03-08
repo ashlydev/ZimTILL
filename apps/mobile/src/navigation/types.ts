@@ -8,6 +8,8 @@ export type MainTabParamList = {
   Products: undefined;
   Customers: undefined;
   Orders: undefined;
+  Payments: undefined;
+  Inventory: undefined;
   More: undefined;
 };
 
@@ -16,7 +18,6 @@ export type MainStackParamList = {
   OrderCreate: undefined;
   OrderDetails: { orderId: string };
   PaynowCheckout: { orderId: string; amount: number };
-  Inventory: undefined;
   Reports: undefined;
   Deliveries: undefined;
   Settings: undefined;

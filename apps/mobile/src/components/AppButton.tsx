@@ -7,7 +7,7 @@ type Props = {
   onPress: () => void;
   disabled?: boolean;
   loading?: boolean;
-  variant?: "primary" | "secondary";
+  variant?: "primary" | "secondary" | "danger";
 };
 
 export function AppButton({ label, onPress, disabled, loading, variant = "primary" }: Props) {
@@ -17,13 +17,13 @@ export function AppButton({ label, onPress, disabled, loading, variant = "primar
       disabled={disabled || loading}
       style={({ pressed }) => [
         styles.base,
-        variant === "primary" ? styles.primary : styles.secondary,
+        variant === "primary" ? styles.primary : variant === "danger" ? styles.danger : styles.secondary,
         (disabled || loading) && styles.disabled,
         pressed && styles.pressed
       ]}
     >
-      {loading ? <ActivityIndicator color={variant === "primary" ? "#fff" : colors.navy} /> : null}
-      <Text style={[styles.text, variant === "primary" ? styles.primaryText : styles.secondaryText]}>{label}</Text>
+      {loading ? <ActivityIndicator color={variant === "primary" || variant === "danger" ? "#fff" : colors.navy} /> : null}
+      <Text style={[styles.text, variant === "primary" || variant === "danger" ? styles.primaryText : styles.secondaryText]}>{label}</Text>
     </Pressable>
   );
 }
@@ -51,6 +51,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderWidth: 1,
     borderColor: colors.navy
+  },
+  danger: {
+    backgroundColor: colors.danger
   },
   pressed: {
     opacity: 0.88

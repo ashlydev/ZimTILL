@@ -97,6 +97,13 @@ function formatAdjustmentReason(reason: InventoryAdjustmentReason, notes?: strin
   return notes?.trim() ? `${reason}: ${notes.trim()}` : reason;
 }
 
+function confirmedAtForStatus(status: string, current: string | null | undefined, fallback: string) {
+  if (["CONFIRMED", "PARTIALLY_PAID", "PAID"].includes(status)) {
+    return current ?? fallback;
+  }
+  return null;
+}
+
 function parseAdjustmentReason(reason: string | null | undefined): InventoryAdjustmentReason | null {
   if (!reason) return null;
   if (reason.startsWith("RETURN")) return "RETURN";
@@ -705,12 +712,23 @@ async function createStockMovement(
 
 export async function updateOrderStatus(context: SessionContext, orderId: string, status: string): Promise<void> {
   const db = await getDb();
+  const order = await getOrderById(context.merchantId, orderId);
+  if (!order) return;
   const now = nowIso();
+  const nextStatus = normalizeOrderStatus(status);
   await db.runAsync(
     `UPDATE orders
-     SET status = ?, updated_at = ?, updated_by_user_id = ?, version = version + 1, last_modified_by_device_id = ?
+     SET status = ?, confirmed_at = ?, updated_at = ?, updated_by_user_id = ?, version = version + 1, last_modified_by_device_id = ?
      WHERE merchant_id = ? AND id = ?;`,
-    [normalizeOrderStatus(status), now, context.userId, context.deviceId, context.merchantId, orderId]
+    [
+      nextStatus,
+      confirmedAtForStatus(nextStatus, order.confirmedAt as string | null | undefined, now),
+      now,
+      context.userId,
+      context.deviceId,
+      context.merchantId,
+      orderId
+    ]
   );
   await enqueueOrderById(context, orderId);
 }
@@ -882,6 +900,18 @@ export async function addPayment(context: SessionContext, input: AddPaymentInput
   await updateOrderPaymentStatus(context, input.orderId);
 
   return payment;
+}
+
+export async function listPayments(merchantId: string): Promise<Record<string, unknown>[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<Record<string, unknown>>(
+    `SELECT * FROM payments
+     WHERE merchant_id = ? AND deleted_at IS NULL
+     ORDER BY paid_at DESC;`,
+    [merchantId]
+  );
+
+  return rows.map((row) => toCamel(row));
 }
 
 export async function listStockMovements(merchantId: string): Promise<Record<string, unknown>[]> {
@@ -1400,7 +1430,7 @@ export async function applySyncChanges(
         row.discountPercent,
         row.total,
         row.notes,
-        row.confirmedAt,
+        row.confirmedAt ?? null,
         row.createdAt,
         row.updatedAt,
         row.deletedAt,

@@ -1,13 +1,16 @@
 import React, { PropsWithChildren } from "react";
-import { SafeAreaView, ScrollView, StyleSheet, View, ViewStyle } from "react-native";
+import { ScrollView, StyleSheet, View, ViewStyle } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, spacing } from "../constants/theme";
 
 export function Screen({ children, style }: PropsWithChildren<{ style?: ViewStyle }>) {
+  const insets = useSafeAreaInsets();
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.bgOrbTop} />
       <View style={styles.bgOrbBottom} />
-      <ScrollView contentContainerStyle={[styles.content, style]}>{children}</ScrollView>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 112 }, style]}>{children}</ScrollView>
     </SafeAreaView>
   );
 }
@@ -36,9 +39,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(18, 50, 93, 0.07)"
   },
   content: {
-    padding: spacing.md,
-    gap: spacing.md,
-    paddingBottom: spacing.xl * 2,
+    padding: 16,
+    gap: 16,
     width: "100%",
     maxWidth: 760,
     alignSelf: "center"

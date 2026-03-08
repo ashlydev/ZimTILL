@@ -175,7 +175,12 @@ export function SettingsScreen() {
       </Card>
 
       <AppButton label="Save settings" onPress={onSave} />
-      <AppButton label="Logout" variant="secondary" onPress={logout} />
+
+      <Card>
+        <Text style={styles.sectionTitle}>Account</Text>
+        <Text style={styles.meta}>Logout clears the local session from this device.</Text>
+        <AppButton label="Logout" variant="danger" onPress={logout} />
+      </Card>
     </Screen>
   );
 }

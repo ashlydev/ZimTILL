@@ -15,6 +15,17 @@ type SyncNowInput = {
   deviceId: string;
 };
 
+function normalizeOrderPayload(payload: Record<string, unknown>) {
+  const status = String(payload.status ?? "");
+  const confirmedAt = typeof payload.confirmedAt === "string" ? payload.confirmedAt : null;
+  const fallback = String(payload.updatedAt ?? payload.createdAt ?? new Date().toISOString());
+
+  return {
+    ...payload,
+    confirmedAt: ["CONFIRMED", "PARTIALLY_PAID", "PAID"].includes(status) ? confirmedAt ?? fallback : null
+  };
+}
+
 export async function syncNow(input: SyncNowInput): Promise<{ pushed: number; pulled: number; serverTime: string }> {
   const state = await getSyncState();
   const outbox = await listOutbox(200);
@@ -32,7 +43,7 @@ export async function syncNow(input: SyncNowInput): Promise<{ pushed: number; pu
           entityType: op.entityType,
           opType: op.opType,
           entityId: op.entityId,
-          payload: op.payload,
+          payload: op.entityType === "order" ? normalizeOrderPayload(op.payload) : op.payload,
           clientUpdatedAt: op.clientUpdatedAt,
           userId: op.userId ?? input.userId,
           deviceId: op.deviceId ?? input.deviceId

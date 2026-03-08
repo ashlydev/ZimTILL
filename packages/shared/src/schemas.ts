@@ -15,6 +15,8 @@ import {
   syncOpTypeValues
 } from "./enums";
 
+const confirmedOrderStatuses = new Set(["CONFIRMED", "PARTIALLY_PAID", "PAID"]);
+
 export const identifierSchema = z
   .string()
   .trim()
@@ -94,7 +96,15 @@ export const orderSchema = baseEntitySchema.extend({
   notes: z.string().trim().max(500).nullable(),
   customerName: z.string().trim().max(120).nullable().optional(),
   customerPhone: z.string().trim().max(30).nullable().optional(),
-  confirmedAt: z.string().datetime().nullable()
+  confirmedAt: z.string().datetime().nullable().optional()
+}).superRefine((value, ctx) => {
+  if (confirmedOrderStatuses.has(value.status) && !value.confirmedAt) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["confirmedAt"],
+      message: "Required"
+    });
+  }
 });
 
 export const orderItemSchema = baseEntitySchema.extend({

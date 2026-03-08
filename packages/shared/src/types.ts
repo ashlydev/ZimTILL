@@ -127,7 +127,7 @@ export type Order = BaseEntity & {
   notes: string | null;
   customerName?: string | null;
   customerPhone?: string | null;
-  confirmedAt: string | null;
+  confirmedAt?: string | null;
 };
 
 export type OrderItem = BaseEntity & {

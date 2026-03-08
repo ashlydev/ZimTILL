@@ -232,6 +232,52 @@ describe("sync service", () => {
     expect(pulled.changes.products[0]?.merchantId).toBe(actorA.merchantId);
   });
 
+  it("accepts draft orders without confirmedAt but rejects confirmed orders missing it", async () => {
+    const { prisma, state } = createInMemoryPrisma();
+    const actor: Actor = { merchantId: randomUUID(), userId: randomUUID(), deviceId: "device-order" };
+    registerActor(state, actor);
+
+    const draftOrder = sampleOrder(actor.merchantId, actor);
+    delete (draftOrder as { confirmedAt?: string | null }).confirmedAt;
+
+    const confirmedOrder = {
+      ...sampleOrder(actor.merchantId, actor, randomUUID()),
+      status: "CONFIRMED" as const
+    };
+    delete (confirmedOrder as { confirmedAt?: string | null }).confirmedAt;
+
+    const result = await handleSyncPush(prisma as never, actor, {
+      operations: [
+        {
+          opId: randomUUID(),
+          entityType: "order",
+          opType: "UPSERT",
+          entityId: draftOrder.id,
+          payload: draftOrder,
+          clientUpdatedAt: draftOrder.updatedAt,
+          userId: actor.userId,
+          deviceId: actor.deviceId
+        },
+        {
+          opId: randomUUID(),
+          entityType: "order",
+          opType: "UPSERT",
+          entityId: confirmedOrder.id,
+          payload: confirmedOrder,
+          clientUpdatedAt: confirmedOrder.updatedAt,
+          userId: actor.userId,
+          deviceId: actor.deviceId
+        }
+      ]
+    });
+
+    expect(result.acceptedOpIds).toHaveLength(1);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]?.reason).toContain("confirmedAt");
+    expect(state.orders).toHaveLength(1);
+    expect(state.orders[0]?.id).toBe(draftOrder.id);
+  });
+
   it("rejects sync for disabled users", async () => {
     const { prisma, state } = createInMemoryPrisma();
     const actor: Actor = { merchantId: randomUUID(), userId: randomUUID(), deviceId: "device-disabled" };

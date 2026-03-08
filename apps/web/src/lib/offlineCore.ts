@@ -181,6 +181,13 @@ function normalizeStatus(status: string): Order["status"] {
   return "DRAFT";
 }
 
+function confirmedAtForStatus(status: string, current: string | null | undefined, fallback: string) {
+  if (["CONFIRMED", "PARTIALLY_PAID", "PAID"].includes(status)) {
+    return current ?? fallback;
+  }
+  return null;
+}
+
 function transactionDone(transaction: IDBTransaction) {
   return new Promise<void>((resolve, reject) => {
     transaction.oncomplete = () => resolve();
@@ -425,10 +432,12 @@ async function updateOrderTotalsFromPayments(orderId: string) {
   }
 
   if (nextStatus !== order.status) {
+    const nextUpdatedAt = nowIso();
     const nextOrder: Order = {
       ...order,
       status: nextStatus,
-      updatedAt: nowIso(),
+      confirmedAt: confirmedAtForStatus(nextStatus, order.confirmedAt, nextUpdatedAt),
+      updatedAt: nextUpdatedAt,
       updatedByUserId: context.userId,
       version: order.version + 1,
       lastModifiedByDeviceId: context.deviceId
@@ -777,6 +786,7 @@ export async function createOrderLocal(input: CreateOrderInput) {
     notes: input.notes?.trim() || null,
     customerName: customer?.name ?? null,
     customerPhone: customer?.phone ?? null,
+    confirmedAt: null,
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
@@ -863,6 +873,7 @@ export async function updateOrderStatusLocal(orderId: string, status: Order["sta
   const next: Order = {
     ...order,
     status: normalizeStatus(status),
+    confirmedAt: confirmedAtForStatus(normalizeStatus(status), order.confirmedAt, nowIso()),
     updatedAt: nowIso(),
     updatedByUserId: context.userId,
     version: order.version + 1,
@@ -944,6 +955,7 @@ export async function cancelOrderLocal(orderId: string) {
   const nextOrder: Order = {
     ...details.order,
     status: "CANCELLED",
+    confirmedAt: wasConfirmed ? details.order.confirmedAt ?? now : null,
     updatedAt: now,
     updatedByUserId: context.userId,
     version: details.order.version + 1,
@@ -1245,6 +1257,17 @@ async function pushOutbox(token: string, merchantId: string) {
     body: JSON.stringify({
       operations: operations.map(({ merchantId: _merchantId, ...operation }) => ({
         ...operation,
+        payload:
+          operation.entityType === "order"
+            ? {
+                ...operation.payload,
+                confirmedAt: confirmedAtForStatus(
+                  String(operation.payload.status ?? ""),
+                  typeof operation.payload.confirmedAt === "string" ? operation.payload.confirmedAt : null,
+                  String(operation.payload.updatedAt ?? operation.payload.createdAt ?? nowIso())
+                )
+              }
+            : operation.payload,
         userId: operation.userId ?? context.userId,
         deviceId: operation.deviceId ?? context.deviceId
       }))

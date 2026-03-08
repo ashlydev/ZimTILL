@@ -1,8 +1,6 @@
 import React from "react";
-import { Alert, StyleSheet, Text } from "react-native";
+import { Alert, StyleSheet, Text, useWindowDimensions } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { MainStackParamList } from "../../navigation/types";
 import { Screen } from "../../components/Screen";
 import { Card } from "../../components/Card";
 import { AppButton } from "../../components/AppButton";
@@ -10,12 +8,23 @@ import { colors } from "../../constants/theme";
 import { getFeatureFlags } from "../../data/repository";
 import { useAuth } from "../../contexts/AuthContext";
 
-type Nav = NativeStackNavigationProp<MainStackParamList>;
+function canAccessPayments(role?: string | null) {
+  return role === "OWNER" || role === "ADMIN" || role === "MANAGER" || role === "CASHIER";
+}
+
+function canAccessInventory(role?: string | null) {
+  return role === "OWNER" || role === "ADMIN" || role === "MANAGER" || role === "STOCK_CONTROLLER";
+}
 
 export function MoreScreen() {
-  const navigation = useNavigation<Nav>();
+  const navigation = useNavigation<any>();
   const { session } = useAuth();
   const [flags, setFlags] = React.useState<Record<string, boolean>>({});
+  const { width } = useWindowDimensions();
+  const showExpandedTabs = width >= 480;
+  const showCustomersInMore = showExpandedTabs;
+  const showPaymentsInMore = canAccessPayments(session?.role) && !showExpandedTabs;
+  const showInventoryInMore = canAccessInventory(session?.role) && !showExpandedTabs;
 
   React.useEffect(() => {
     if (!session) return;
@@ -27,7 +36,9 @@ export function MoreScreen() {
       <Text style={styles.title}>More</Text>
       <Text style={styles.subtitleMeta}>Extra tools and support screens.</Text>
       <Card>
-        <AppButton label="Inventory" onPress={() => navigation.navigate("Inventory")} />
+        {showCustomersInMore ? <AppButton label="Customers" onPress={() => navigation.navigate("Customers")} /> : null}
+        {showPaymentsInMore ? <AppButton label="Payments" onPress={() => navigation.navigate("Payments")} /> : null}
+        {showInventoryInMore ? <AppButton label="Inventory" onPress={() => navigation.navigate("Inventory")} /> : null}
         <AppButton label="Reports" onPress={() => navigation.navigate("Reports")} />
         {session?.role === "DELIVERY_RIDER" || flags["DELIVERY_MODE"] ? (
           <AppButton label="Deliveries" onPress={() => navigation.navigate("Deliveries")} />
