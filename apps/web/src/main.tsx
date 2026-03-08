@@ -1,17 +1,9 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { registerSW } from "virtual:pwa-register";
 import App from "./App";
 import { AuthProvider } from "./context/AuthContext";
 import "./styles.css";
-
-registerSW({
-  immediate: true,
-  onRegisteredSW(swUrl: string) {
-    console.info("Service worker registered", swUrl);
-  }
-});
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      injectRegister: "inline",
       registerType: "autoUpdate",
       includeAssets: [
         "icons/icon-192.png",
@@ -14,10 +15,13 @@ export default defineConfig({
         "icons/apple-touch-icon.png"
       ],
       manifest: {
+        id: "/",
         name: "ZimTILL",
         short_name: "ZimTILL",
         description: "Offline-first orders, payments, stock, and catalog management for hardware shops and SMEs.",
+        prefer_related_applications: false,
         display: "standalone",
+        display_override: ["standalone", "minimal-ui", "browser"],
         start_url: "/",
         scope: "/",
         theme_color: "#0B1F3B",
