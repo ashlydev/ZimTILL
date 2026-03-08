@@ -10,7 +10,7 @@ const basePlans = [
     id: "11111111-1111-1111-1111-111111111111",
     code: "STARTER",
     name: "Starter",
-    priceMonthly: 5,
+    priceMonthly: 10,
     features: {
       catalog: true,
       deliveries: false,
@@ -31,7 +31,7 @@ const basePlans = [
     id: "22222222-2222-2222-2222-222222222222",
     code: "PRO",
     name: "Pro",
-    priceMonthly: 10,
+    priceMonthly: 15,
     features: {
       catalog: true,
       deliveries: true,
@@ -52,7 +52,7 @@ const basePlans = [
     id: "33333333-3333-3333-3333-333333333333",
     code: "BUSINESS",
     name: "Business",
-    priceMonthly: 20,
+    priceMonthly: 25,
     features: {
       catalog: true,
       deliveries: true,
