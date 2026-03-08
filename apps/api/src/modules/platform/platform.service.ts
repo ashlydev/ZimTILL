@@ -144,11 +144,19 @@ export async function ensureMerchantBootstrap(
   await ensureBasePlans(prisma);
 
   for (const key of defaultGlobalFeatureFlags) {
-    await prisma.featureFlag.upsert({
-      where: { key_merchantId: { key, merchantId: null } },
-      create: { key, merchantId: null, enabled: key !== "RESTAURANT_MODE" },
-      update: {}
+    const existing = await prisma.featureFlag.findFirst({
+      where: {
+        key,
+        merchantId: null,
+        deletedAt: null
+      }
     });
+
+    if (!existing) {
+      await prisma.featureFlag.create({
+        data: { key, merchantId: null, enabled: key !== "RESTAURANT_MODE" }
+      });
+    }
   }
 
   for (const key of defaultMerchantFeatureFlags) {
