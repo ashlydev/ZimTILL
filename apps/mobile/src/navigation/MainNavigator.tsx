@@ -13,6 +13,7 @@ import { HelpScreen } from "../screens/help/HelpScreen";
 import { OrderCreateScreen } from "../screens/orders/OrderCreateScreen";
 import { OrderDetailsScreen } from "../screens/orders/OrderDetailsScreen";
 import { PaynowCheckoutScreen } from "../screens/payments/PaynowCheckoutScreen";
+import { DeliveriesScreen } from "../screens/deliveries/DeliveriesScreen";
 import { MainStackParamList, MainTabParamList } from "./types";
 import { colors } from "../constants/theme";
 
@@ -53,6 +54,7 @@ export function MainNavigator() {
       <Stack.Screen name="PaynowCheckout" component={PaynowCheckoutScreen} options={{ title: "Paynow" }} />
       <Stack.Screen name="Inventory" component={InventoryScreen} />
       <Stack.Screen name="Reports" component={ReportsScreen} />
+      <Stack.Screen name="Deliveries" component={DeliveriesScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
       <Stack.Screen name="Help" component={HelpScreen} />
     </Stack.Navigator>

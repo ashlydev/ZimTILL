@@ -14,6 +14,13 @@ import { PaymentsPage } from "./pages/PaymentsPage";
 import { InventoryPage } from "./pages/InventoryPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { BranchesPage } from "./pages/BranchesPage";
+import { TransfersPage } from "./pages/TransfersPage";
+import { DeliveriesPage } from "./pages/DeliveriesPage";
+import { CatalogPage } from "./pages/CatalogPage";
+import { PricingPage } from "./pages/PricingPage";
+import { AdminPage } from "./pages/AdminPage";
+import { PublicCatalogPage } from "./pages/PublicCatalogPage";
 
 function ProtectedRoutes() {
   const { token, loading } = useAuth();
@@ -62,6 +69,8 @@ export default function App() {
           </PublicOnlyRoutes>
         }
       />
+      <Route path="/c/:merchantSlug" element={<PublicCatalogPage />} />
+      <Route path="/shop/:merchantSlug" element={<PublicCatalogPage />} />
 
       <Route element={<ProtectedRoutes />}>
         <Route index element={<DashboardPage />} />
@@ -73,7 +82,13 @@ export default function App() {
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/payments" element={<PaymentsPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
+        <Route path="/transfers" element={<TransfersPage />} />
+        <Route path="/deliveries" element={<DeliveriesPage />} />
         <Route path="/reports" element={<ReportsPage />} />
+        <Route path="/branches" element={<BranchesPage />} />
+        <Route path="/catalog" element={<CatalogPage />} />
+        <Route path="/pricing" element={<PricingPage />} />
+        <Route path="/admin" element={<AdminPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
 

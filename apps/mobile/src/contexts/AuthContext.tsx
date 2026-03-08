@@ -8,8 +8,10 @@ type Session = {
   merchantId: string;
   userId: string;
   identifier: string;
+  role: "OWNER" | "ADMIN" | "MANAGER" | "CASHIER" | "STOCK_CONTROLLER" | "DELIVERY_RIDER";
   businessName: string;
   deviceId: string;
+  activeBranchId?: string | null;
 };
 
 type AuthContextType = {
@@ -67,7 +69,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const response = await apiRequest<{
       token: string;
       merchant: { id: string; name: string };
-      user: { id: string; identifier: string };
+      user: { id: string; identifier: string; role: Session["role"] };
+      activeBranchId?: string | null;
     }>("/auth/register", {
       method: "POST",
       body: {
@@ -83,8 +86,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
       merchantId: response.merchant.id,
       userId: response.user.id,
       identifier: response.user.identifier,
+      role: response.user.role,
       businessName: response.merchant.name,
-      deviceId
+      deviceId,
+      activeBranchId: response.activeBranchId ?? null
     });
   };
 
@@ -93,7 +98,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const response = await apiRequest<{
       token: string;
       merchant: { id: string; name: string };
-      user: { id: string; identifier: string };
+      user: { id: string; identifier: string; role: Session["role"] };
+      activeBranchId?: string | null;
     }>("/auth/login", {
       method: "POST",
       body: {
@@ -108,8 +114,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
       merchantId: response.merchant.id,
       userId: response.user.id,
       identifier: response.user.identifier,
+      role: response.user.role,
       businessName: response.merchant.name,
-      deviceId
+      deviceId,
+      activeBranchId: response.activeBranchId ?? null
     });
   };
 

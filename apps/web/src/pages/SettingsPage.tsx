@@ -41,11 +41,11 @@ export function SettingsPage() {
   const [staffBusy, setStaffBusy] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
 
-  const canEditSettings = hasAnyRole(["OWNER", "MANAGER"]);
-  const canManageStaff = hasAnyRole(["OWNER"]);
-  const canViewStaff = hasAnyRole(["OWNER", "MANAGER"]);
-  const canManageDevices = hasAnyRole(["OWNER", "MANAGER"]);
-  const canManageBackup = hasAnyRole(["OWNER", "MANAGER"]);
+  const canEditSettings = hasAnyRole(["OWNER", "ADMIN", "MANAGER"]);
+  const canManageStaff = hasAnyRole(["OWNER", "ADMIN"]);
+  const canViewStaff = hasAnyRole(["OWNER", "ADMIN", "MANAGER"]);
+  const canManageDevices = hasAnyRole(["OWNER", "ADMIN", "MANAGER"]);
+  const canManageBackup = hasAnyRole(["OWNER", "ADMIN", "MANAGER"]);
 
   const refreshSettings = async () => {
     if (!token) return;
@@ -361,9 +361,12 @@ export function SettingsPage() {
                 onChange={(event) => setStaffForm((prev) => ({ ...prev, role: event.target.value as Role }))}
                 value={staffForm.role}
               >
+                <option value="OWNER">OWNER</option>
+                <option value="ADMIN">ADMIN</option>
                 <option value="MANAGER">MANAGER</option>
                 <option value="CASHIER">CASHIER</option>
-                <option value="OWNER">OWNER</option>
+                <option value="STOCK_CONTROLLER">STOCK_CONTROLLER</option>
+                <option value="DELIVERY_RIDER">DELIVERY_RIDER</option>
               </Select>
               <div className="actions-row">
                 <Button disabled={staffBusy} type="submit" variant="primary">
@@ -403,8 +406,11 @@ export function SettingsPage() {
                       value={member.role}
                     >
                       <option value="OWNER">OWNER</option>
+                      <option value="ADMIN">ADMIN</option>
                       <option value="MANAGER">MANAGER</option>
                       <option value="CASHIER">CASHIER</option>
+                      <option value="STOCK_CONTROLLER">STOCK_CONTROLLER</option>
+                      <option value="DELIVERY_RIDER">DELIVERY_RIDER</option>
                     </Select>
                     <Button onClick={() => void onResetPin(member)} size="sm" variant="secondary">
                       Reset PIN

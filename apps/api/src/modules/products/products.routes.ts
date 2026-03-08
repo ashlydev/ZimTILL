@@ -8,6 +8,7 @@ import { requirePermission } from "../../middleware/permissions";
 import { validateBody } from "../../middleware/validate";
 import { toPlain } from "../../lib/serialization";
 import { recordAudit } from "../audit/audit.service";
+import { assertPlanLimit } from "../platform/platform.service";
 
 function getRouteParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
@@ -36,7 +37,9 @@ productsRouter.get(
   "/",
   requirePermission("products.read"),
   asyncHandler(async (req, res) => {
+    await assertPlanLimit(prisma, req.user!.merchantId, "products");
     const merchantId = req.user!.merchantId;
+    const branchId = typeof req.query.branchId === "string" ? req.query.branchId : req.user!.branchId ?? undefined;
     const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
     const lowStockOnly = req.query.lowStock === "true";
 
@@ -56,9 +59,30 @@ productsRouter.get(
       orderBy: { updatedAt: "desc" }
     });
 
+    const branchStocks = branchId
+      ? await prisma.productStock.findMany({
+          where: {
+            merchantId,
+            branchId,
+            productId: { in: products.map((item) => item.id) },
+            deletedAt: null
+          }
+        })
+      : [];
+
+    const stockByProduct = new Map(branchStocks.map((item) => [item.productId, item]));
+    const mapped = products.map((item) => {
+      const branchStock = stockByProduct.get(item.id);
+      return {
+        ...item,
+        branchStockQty: branchStock ? Number(branchStock.qty) : Number(item.stockQty),
+        branchLowStockThreshold: branchStock ? Number(branchStock.lowStockThreshold) : Number(item.lowStockThreshold)
+      };
+    });
+
     const filtered = lowStockOnly
-      ? products.filter((item) => Number(item.stockQty) <= Number(item.lowStockThreshold))
-      : products;
+      ? mapped.filter((item) => Number(item.branchStockQty) <= Number(item.branchLowStockThreshold))
+      : mapped;
 
     res.json({ products: toPlain(filtered) });
   })
@@ -71,24 +95,46 @@ productsRouter.post(
   asyncHandler(async (req, res) => {
     const merchantId = req.user!.merchantId;
     const deviceId = req.user!.deviceId;
+    const branchId = req.user!.branchId;
     const now = new Date();
     const body = req.body as z.infer<typeof productCreateSchema>;
 
-    const product = await prisma.product.create({
-      data: {
-        id: randomUUID(),
-        merchantId,
-        name: body.name,
-        price: body.price,
-        cost: body.cost ?? null,
-        sku: body.sku ?? null,
-        stockQty: body.stockQty,
-        lowStockThreshold: body.lowStockThreshold,
-        createdAt: now,
-        updatedAt: now,
-        version: 1,
-        lastModifiedByDeviceId: deviceId
+    const product = await prisma.$transaction(async (tx) => {
+      const created = await tx.product.create({
+        data: {
+          id: randomUUID(),
+          merchantId,
+          name: body.name,
+          price: body.price,
+          cost: body.cost ?? null,
+          sku: body.sku ?? null,
+          stockQty: body.stockQty,
+          lowStockThreshold: body.lowStockThreshold,
+          createdAt: now,
+          updatedAt: now,
+          version: 1,
+          lastModifiedByDeviceId: deviceId
+        }
+      });
+
+      if (branchId) {
+        await tx.productStock.create({
+          data: {
+            id: randomUUID(),
+            merchantId,
+            branchId,
+            productId: created.id,
+            qty: body.stockQty,
+            lowStockThreshold: body.lowStockThreshold,
+            createdAt: now,
+            updatedAt: now,
+            version: 1,
+            lastModifiedByDeviceId: deviceId
+          }
+        });
       }
+
+      return created;
     });
 
     await recordAudit(prisma, req.user!, {
@@ -188,6 +234,7 @@ productsRouter.post(
 
     const { quantity, reason } = req.body as z.infer<typeof stockAdjustSchema>;
     const now = new Date();
+    const branchId = req.user!.branchId;
 
     const updated = await prisma.$transaction(async (tx) => {
       const nextQty = Number(product.stockQty) + quantity;
@@ -202,10 +249,44 @@ productsRouter.post(
         }
       });
 
+      if (branchId) {
+        const branchStock = await tx.productStock.findFirst({
+          where: { merchantId, branchId, productId: product.id, deletedAt: null }
+        });
+
+        if (branchStock) {
+          await tx.productStock.update({
+            where: { id: branchStock.id },
+            data: {
+              qty: Number(branchStock.qty) + quantity,
+              updatedAt: now,
+              version: { increment: 1 },
+              lastModifiedByDeviceId: req.user!.deviceId
+            }
+          });
+        } else {
+          await tx.productStock.create({
+            data: {
+              id: randomUUID(),
+              merchantId,
+              branchId,
+              productId: product.id,
+              qty: Number(product.stockQty) + quantity,
+              lowStockThreshold: Number(product.lowStockThreshold),
+              createdAt: now,
+              updatedAt: now,
+              version: 1,
+              lastModifiedByDeviceId: req.user!.deviceId
+            }
+          });
+        }
+      }
+
       await tx.stockMovement.create({
         data: {
           id: randomUUID(),
           merchantId,
+          branchId: branchId ?? null,
           productId: product.id,
           type: "ADJUSTMENT",
           quantity,

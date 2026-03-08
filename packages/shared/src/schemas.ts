@@ -1,10 +1,16 @@
 import { z } from "zod";
 import {
+  deliveryStatusValues,
+  orderDocumentTypeValues,
+  orderSourceValues,
   orderStatusValues,
   paymentMethodValues,
+  paymentRecordStatusValues,
   paynowMethodValues,
   roleValues,
   stockMovementTypeValues,
+  stockTransferStatusValues,
+  subscriptionStatusValues,
   syncEntityTypeValues,
   syncOpTypeValues
 } from "./enums";
@@ -27,12 +33,14 @@ export const registerSchema = z.object({
 export const loginSchema = z.object({
   identifier: identifierSchema,
   pin: pinSchema,
-  deviceId: z.string().trim().min(3).max(120)
+  deviceId: z.string().trim().min(3).max(120),
+  branchId: z.string().uuid().optional()
 });
 
 const baseEntitySchema = z.object({
   id: z.string().uuid(),
   merchantId: z.string().uuid(),
+  branchId: z.string().uuid().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable(),
@@ -40,13 +48,29 @@ const baseEntitySchema = z.object({
   lastModifiedByDeviceId: z.string().min(1)
 });
 
+export const branchSchema = baseEntitySchema.extend({
+  name: z.string().trim().min(1).max(120),
+  address: z.string().trim().max(240).nullable().optional(),
+  phone: z.string().trim().max(30).nullable().optional(),
+  isDefault: z.boolean().default(false)
+});
+
 export const productSchema = baseEntitySchema.extend({
   name: z.string().trim().min(1).max(120),
   price: z.number().nonnegative(),
   cost: z.number().nonnegative().nullable(),
   sku: z.string().trim().max(60).nullable(),
+  category: z.string().trim().max(60).nullable().optional(),
   stockQty: z.number(),
-  lowStockThreshold: z.number().int().nonnegative()
+  lowStockThreshold: z.number().nonnegative(),
+  isPublished: z.boolean().default(true),
+  isActive: z.boolean().default(true)
+});
+
+export const productStockSchema = baseEntitySchema.extend({
+  productId: z.string().uuid(),
+  qty: z.number(),
+  lowStockThreshold: z.number().nonnegative()
 });
 
 export const customerSchema = baseEntitySchema.extend({
@@ -59,11 +83,15 @@ export const orderSchema = baseEntitySchema.extend({
   customerId: z.string().uuid().nullable(),
   orderNumber: z.string().trim().min(1).max(40),
   status: z.enum(orderStatusValues),
+  documentType: z.enum(orderDocumentTypeValues).default("ORDER"),
+  source: z.enum(orderSourceValues).default("IN_STORE"),
   subtotal: z.number().nonnegative(),
   discountAmount: z.number().nonnegative(),
   discountPercent: z.number().min(0).max(100),
   total: z.number().nonnegative(),
   notes: z.string().trim().max(500).nullable(),
+  customerName: z.string().trim().max(120).nullable().optional(),
+  customerPhone: z.string().trim().max(30).nullable().optional(),
   confirmedAt: z.string().datetime().nullable()
 });
 
@@ -81,7 +109,7 @@ export const paymentSchema = baseEntitySchema.extend({
   method: z.enum(paymentMethodValues),
   reference: z.string().trim().max(100).nullable(),
   paidAt: z.string().datetime(),
-  status: z.enum(["PENDING", "CONFIRMED"]),
+  status: z.enum(paymentRecordStatusValues),
   paynowTransactionId: z.string().uuid().nullable()
 });
 
@@ -93,6 +121,30 @@ export const stockMovementSchema = baseEntitySchema.extend({
   orderId: z.string().uuid().nullable()
 });
 
+export const stockTransferSchema = baseEntitySchema.extend({
+  fromBranchId: z.string().uuid(),
+  toBranchId: z.string().uuid(),
+  status: z.enum(stockTransferStatusValues),
+  requestedByUserId: z.string().uuid(),
+  approvedByUserId: z.string().uuid().nullable(),
+  receivedByUserId: z.string().uuid().nullable(),
+  notes: z.string().trim().max(240).nullable()
+});
+
+export const stockTransferItemSchema = baseEntitySchema.extend({
+  transferId: z.string().uuid(),
+  productId: z.string().uuid(),
+  quantity: z.number().positive()
+});
+
+export const deliverySchema = baseEntitySchema.extend({
+  orderId: z.string().uuid(),
+  assignedToUserId: z.string().uuid().nullable(),
+  status: z.enum(deliveryStatusValues),
+  proofPhotoUrl: z.string().trim().max(500).nullable(),
+  deliveredAt: z.string().datetime().nullable()
+});
+
 export const settingsSchema = baseEntitySchema.extend({
   businessName: z.string().min(1).max(120),
   currencyCode: z.enum(["USD", "ZWL"]),
@@ -101,6 +153,14 @@ export const settingsSchema = baseEntitySchema.extend({
   whatsappTemplate: z.string().max(1000),
   supportPhone: z.string().max(30).nullable(),
   supportEmail: z.string().email().nullable()
+});
+
+export const catalogSettingsSchema = baseEntitySchema.extend({
+  merchantSlug: z.string().trim().min(2).max(80),
+  isEnabled: z.boolean().default(false),
+  headline: z.string().trim().max(160).nullable(),
+  description: z.string().trim().max(500).nullable(),
+  checkoutPolicy: z.enum(["CONFIRM_ON_PAID", "CONFIRM_ON_CREATE"]).default("CONFIRM_ON_PAID")
 });
 
 export const featureFlagSchema = z.object({
@@ -141,3 +201,14 @@ export const paynowStatusSchema = z.object({
 });
 
 export const roleSchema = z.enum(roleValues);
+
+export const subscriptionSchema = z.object({
+  id: z.string().uuid(),
+  merchantId: z.string().uuid(),
+  planId: z.string().uuid(),
+  status: z.enum(subscriptionStatusValues),
+  billingPeriodStart: z.string().datetime(),
+  billingPeriodEnd: z.string().datetime(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});

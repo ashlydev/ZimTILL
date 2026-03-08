@@ -360,6 +360,129 @@ textarea.input-control {
   min-width: 220px;
 }
 
+.topbar-actions-wide {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.branch-switcher {
+  display: grid;
+  gap: 4px;
+  min-width: 180px;
+  color: var(--gray-500);
+  font-size: 0.82rem;
+}
+
+.input-control-compact {
+  min-height: 36px;
+  padding: 8px 10px;
+}
+
+.split-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.metric-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.inline-proof {
+  min-width: 180px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--gray-900);
+  font-weight: 600;
+}
+
+.catalog-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-3);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.catalog-hero {
+  background: linear-gradient(135deg, #f8fafc 0%, #ffffff 60%, #eef2f7 100%);
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+}
+
+.catalog-hero h1 {
+  margin: 0;
+  color: var(--navy-900);
+  font-size: clamp(1.5rem, 2vw + 1rem, 2.4rem);
+}
+
+.catalog-hero p {
+  margin: var(--space-1) 0 0;
+  color: var(--gray-500);
+  max-width: 720px;
+}
+
+.catalog-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.9fr);
+  gap: var(--space-2);
+  align-items: start;
+}
+
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.catalog-product-card {
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  display: grid;
+  gap: var(--space-1);
+}
+
+.catalog-product-card h3 {
+  margin: 0;
+  color: var(--navy-900);
+}
+
+.cart-summary {
+  display: grid;
+  gap: var(--space-1);
+}
+
+@media (max-width: 960px) {
+  .split-grid,
+  .pricing-grid,
+  .catalog-layout,
+  .catalog-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .filters-right {
   display: flex;
   align-items: center;

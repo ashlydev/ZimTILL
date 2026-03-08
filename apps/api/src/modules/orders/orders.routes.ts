@@ -38,9 +38,11 @@ ordersRouter.get(
   requirePermission("orders.read"),
   asyncHandler(async (req, res) => {
     const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+    const branchId = typeof req.query.branchId === "string" ? req.query.branchId : req.user!.branchId ?? undefined;
     const orders = await prisma.order.findMany({
       where: {
         merchantId: req.user!.merchantId,
+        ...(branchId ? { branchId } : {}),
         deletedAt: null,
         ...(search
           ? {
@@ -66,6 +68,7 @@ ordersRouter.post(
   asyncHandler(async (req, res) => {
     const merchantId = req.user!.merchantId;
     const deviceId = req.user!.deviceId;
+    const branchId = req.user!.branchId ?? null;
     const body = req.body as z.infer<typeof createOrderSchema>;
     const now = new Date();
 
@@ -101,14 +104,19 @@ ordersRouter.post(
         data: {
           id: orderId,
           merchantId,
+          branchId,
           customerId: body.customerId ?? null,
           orderNumber,
           status: "DRAFT",
+          documentType: "ORDER",
+          source: "IN_STORE",
           subtotal,
           discountAmount,
           discountPercent,
           total,
           notes: body.notes ?? null,
+          customerName: null,
+          customerPhone: null,
           confirmedAt: null,
           createdAt: now,
           updatedAt: now,
@@ -164,7 +172,8 @@ ordersRouter.get(
       include: {
         customer: true,
         items: { include: { product: true }, where: { deletedAt: null } },
-        payments: { where: { deletedAt: null }, orderBy: { paidAt: "desc" } }
+        payments: { where: { deletedAt: null }, orderBy: { paidAt: "desc" } },
+        delivery: true
       }
     });
 
@@ -262,6 +271,24 @@ ordersRouter.post(
         });
         if (!product) continue;
 
+        if (order.branchId) {
+          const branchStock = await tx.productStock.findFirst({
+            where: { merchantId, branchId: order.branchId, productId: product.id, deletedAt: null }
+          });
+
+          if (branchStock) {
+            await tx.productStock.update({
+              where: { id: branchStock.id },
+              data: {
+                qty: Number(branchStock.qty) - Number(item.quantity),
+                updatedAt: now,
+                version: { increment: 1 },
+                lastModifiedByDeviceId: req.user!.deviceId
+              }
+            });
+          }
+        }
+
         await tx.product.update({
           where: { id: product.id },
           data: {
@@ -276,6 +303,7 @@ ordersRouter.post(
           data: {
             id: randomUUID(),
             merchantId,
+            branchId: order.branchId ?? null,
             productId: product.id,
             type: "OUT",
             quantity: -Number(item.quantity),
@@ -345,6 +373,24 @@ ordersRouter.post(
 
           if (!product) continue;
 
+          if (order.branchId) {
+            const branchStock = await tx.productStock.findFirst({
+              where: { merchantId, branchId: order.branchId, productId: product.id, deletedAt: null }
+            });
+
+            if (branchStock) {
+              await tx.productStock.update({
+                where: { id: branchStock.id },
+                data: {
+                  qty: Number(branchStock.qty) + Number(item.quantity),
+                  updatedAt: now,
+                  version: { increment: 1 },
+                  lastModifiedByDeviceId: req.user!.deviceId
+                }
+              });
+            }
+          }
+
           await tx.product.update({
             where: { id: product.id },
             data: {
@@ -359,6 +405,7 @@ ordersRouter.post(
             data: {
               id: randomUUID(),
               merchantId,
+              branchId: order.branchId ?? null,
               productId: product.id,
               type: "IN",
               quantity: Number(item.quantity),

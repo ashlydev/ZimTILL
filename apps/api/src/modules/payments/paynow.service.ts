@@ -147,6 +147,9 @@ export async function initiatePaynow(
   payload: unknown
 ): Promise<{ transactionId: string; pollUrl: string; redirectUrl?: string; instructions: string }> {
   const body = paynowInitiateSchema.parse(payload);
+  const rawBranchId =
+    typeof payload === "object" && payload && "branchId" in payload ? (payload as { branchId?: unknown }).branchId : null;
+  const branchId = typeof rawBranchId === "string" && rawBranchId.trim().length > 0 ? rawBranchId : null;
   const order = await prisma.order.findFirst({
     where: {
       id: body.orderId,
@@ -165,7 +168,17 @@ export async function initiatePaynow(
 
   const paynow = requirePaynowClient();
   const reference = `NVO-${Date.now()}-${Math.floor(100000 + Math.random() * 900000)}`;
-  const payment = paynow.createPayment(reference, identifier.includes("@") ? identifier : undefined);
+  const [merchant, settings] = await Promise.all([
+    prisma.merchant.findUnique({ where: { id: merchantId } }),
+    prisma.settings.findFirst({ where: { merchantId, deletedAt: null } })
+  ]);
+  const payerEmail =
+    (identifier.includes("@") ? identifier : null) ??
+    settings?.supportEmail ??
+    merchant?.email ??
+    `support+${merchantId.slice(0, 6)}@novoriq.app`;
+
+  const payment = paynow.createPayment(reference, payerEmail);
   payment.add(`Order ${order.orderNumber}`, body.amount);
 
   let response: Record<string, unknown>;
@@ -194,6 +207,7 @@ export async function initiatePaynow(
       data: {
         id: transactionId,
         merchantId,
+        branchId: branchId ?? order.branchId ?? null,
         orderId: order.id,
         amount: body.amount,
         method: body.method,
@@ -212,6 +226,7 @@ export async function initiatePaynow(
       data: {
         id: randomUUID(),
         merchantId,
+        branchId: branchId ?? order.branchId ?? null,
         orderId: order.id,
         amount: body.amount,
         method: "PAYNOW",

@@ -17,6 +17,7 @@ reportsRouter.get(
   requirePermission("reports.read"),
   asyncHandler(async (req, res) => {
     const merchantId = req.user!.merchantId;
+    const branchId = typeof req.query.branchId === "string" ? req.query.branchId : req.user!.branchId ?? undefined;
     const now = new Date();
     const todayStart = startOfDay(now);
     const sevenDaysAgo = new Date(todayStart);
@@ -26,6 +27,7 @@ reportsRouter.get(
       prisma.payment.findMany({
         where: {
           merchantId,
+          ...(branchId ? { branchId } : {}),
           deletedAt: null,
           status: "CONFIRMED",
           paidAt: { gte: todayStart }
@@ -34,6 +36,7 @@ reportsRouter.get(
       prisma.payment.findMany({
         where: {
           merchantId,
+          ...(branchId ? { branchId } : {}),
           deletedAt: null,
           status: "CONFIRMED",
           paidAt: { gte: sevenDaysAgo }
@@ -42,6 +45,7 @@ reportsRouter.get(
       prisma.order.count({
         where: {
           merchantId,
+          ...(branchId ? { branchId } : {}),
           deletedAt: null,
           createdAt: { gte: todayStart }
         }
@@ -49,6 +53,7 @@ reportsRouter.get(
       prisma.order.count({
         where: {
           merchantId,
+          ...(branchId ? { branchId } : {}),
           deletedAt: null,
           createdAt: { gte: sevenDaysAgo }
         }
@@ -56,6 +61,7 @@ reportsRouter.get(
       prisma.orderItem.findMany({
         where: {
           merchantId,
+          ...(branchId ? { branchId } : {}),
           deletedAt: null,
           createdAt: { gte: sevenDaysAgo }
         },

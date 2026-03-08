@@ -72,6 +72,15 @@ authRouter.get(
 
     const merchant = await prisma.merchant.findUnique({ where: { id: req.user.merchantId } });
     const settings = await prisma.settings.findFirst({ where: { merchantId: req.user.merchantId, deletedAt: null } });
+    const branches = await prisma.branch.findMany({
+      where: { merchantId: req.user.merchantId, deletedAt: null },
+      orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }]
+    });
+    const subscription = await prisma.subscription.findFirst({
+      where: { merchantId: req.user.merchantId },
+      include: { plan: true },
+      orderBy: { updatedAt: "desc" }
+    });
     const flags = await prisma.featureFlag.findMany({
       where: {
         deletedAt: null,
@@ -83,6 +92,9 @@ authRouter.get(
       user: toPlain(user),
       merchant: toPlain(merchant),
       settings: toPlain(settings),
+      branches: toPlain(branches),
+      activeBranchId: req.user.branchId ?? null,
+      subscription: toPlain(subscription),
       featureFlags: toPlain(flags)
     });
   })

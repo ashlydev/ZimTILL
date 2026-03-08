@@ -4,9 +4,11 @@ import { env } from "../config/env";
 export type AuthTokenPayload = {
   userId: string;
   merchantId: string;
-  role: "OWNER" | "MANAGER" | "CASHIER";
+  role: "OWNER" | "ADMIN" | "MANAGER" | "CASHIER" | "STOCK_CONTROLLER" | "DELIVERY_RIDER";
   identifier: string;
   deviceId: string;
+  branchId: string | null;
+  platformAccess: boolean;
 };
 
 export function signToken(payload: AuthTokenPayload): string {

@@ -12,9 +12,11 @@ inventoryRouter.get(
   "/movements",
   requirePermission("inventory.read"),
   asyncHandler(async (req, res) => {
+    const branchId = typeof req.query.branchId === "string" ? req.query.branchId : req.user!.branchId ?? undefined;
     const movements = await prisma.stockMovement.findMany({
       where: {
         merchantId: req.user!.merchantId,
+        ...(branchId ? { branchId } : {}),
         deletedAt: null
       },
       include: { product: true, order: true },
@@ -30,6 +32,22 @@ inventoryRouter.get(
   "/low-stock",
   requirePermission("inventory.read"),
   asyncHandler(async (req, res) => {
+    const branchId = typeof req.query.branchId === "string" ? req.query.branchId : req.user!.branchId ?? undefined;
+    if (branchId) {
+      const stocks = await prisma.productStock.findMany({
+        where: {
+          merchantId: req.user!.merchantId,
+          branchId,
+          deletedAt: null
+        },
+        include: { product: true }
+      });
+
+      const low = stocks.filter((item) => Number(item.qty) <= Number(item.lowStockThreshold));
+      res.json({ products: toPlain(low), lowStockCount: low.length });
+      return;
+    }
+
     const products = await prisma.product.findMany({
       where: {
         merchantId: req.user!.merchantId,

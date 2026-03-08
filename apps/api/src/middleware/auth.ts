@@ -41,7 +41,9 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     req.user = {
       ...decoded,
       role: user.role,
-      identifier: user.identifier
+      identifier: user.identifier,
+      branchId: device.activeBranchId ?? user.defaultBranchId ?? decoded.branchId ?? null,
+      platformAccess: user.isPlatformAdmin || decoded.platformAccess || user.role === "OWNER"
     };
     next();
   } catch {

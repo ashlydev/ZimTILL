@@ -29,6 +29,9 @@ export function MoreScreen() {
       <Card>
         <AppButton label="Inventory" onPress={() => navigation.navigate("Inventory")} />
         <AppButton label="Reports" onPress={() => navigation.navigate("Reports")} />
+        {session?.role === "DELIVERY_RIDER" || flags["DELIVERY_MODE"] ? (
+          <AppButton label="Deliveries" onPress={() => navigation.navigate("Deliveries")} />
+        ) : null}
         <AppButton label="Settings" onPress={() => navigation.navigate("Settings")} />
         <AppButton label="Help" onPress={() => navigation.navigate("Help")} />
       </Card>

@@ -20,65 +20,135 @@ export type AppPermission =
   | "staff.manage"
   | "devices.read"
   | "devices.manage"
-  | "backup.manage";
-
-const ownerPermissions: AppPermission[] = [
-  "products.read",
-  "products.write",
-  "customers.read",
-  "customers.write",
-  "orders.read",
-  "orders.write",
-  "orders.manage",
-  "payments.read",
-  "payments.write",
-  "inventory.read",
-  "inventory.write",
-  "reports.read",
-  "settings.read",
-  "settings.write",
-  "staff.read",
-  "staff.manage",
-  "devices.read",
-  "devices.manage",
-  "backup.manage"
-];
-
-const managerPermissions: AppPermission[] = [
-  "products.read",
-  "products.write",
-  "customers.read",
-  "customers.write",
-  "orders.read",
-  "orders.write",
-  "orders.manage",
-  "payments.read",
-  "payments.write",
-  "inventory.read",
-  "inventory.write",
-  "reports.read",
-  "settings.read",
-  "settings.write",
-  "staff.read",
-  "devices.read",
-  "devices.manage",
-  "backup.manage"
-];
-
-const cashierPermissions: AppPermission[] = [
-  "products.read",
-  "customers.read",
-  "orders.read",
-  "orders.write",
-  "payments.read",
-  "payments.write",
-  "reports.read"
-];
+  | "backup.manage"
+  | "branches.read"
+  | "branches.manage"
+  | "transfers.read"
+  | "transfers.write"
+  | "catalog.read"
+  | "catalog.write"
+  | "deliveries.read"
+  | "deliveries.manage"
+  | "pricing.read"
+  | "pricing.manage"
+  | "admin.access"
+  | "billing.manage";
 
 const rolePermissions: Record<AuthTokenPayload["role"], Set<AppPermission>> = {
-  OWNER: new Set(ownerPermissions),
-  MANAGER: new Set(managerPermissions),
-  CASHIER: new Set(cashierPermissions)
+  OWNER: new Set([
+    "products.read",
+    "products.write",
+    "customers.read",
+    "customers.write",
+    "orders.read",
+    "orders.write",
+    "orders.manage",
+    "payments.read",
+    "payments.write",
+    "inventory.read",
+    "inventory.write",
+    "reports.read",
+    "settings.read",
+    "settings.write",
+    "staff.read",
+    "staff.manage",
+    "devices.read",
+    "devices.manage",
+    "backup.manage",
+    "branches.read",
+    "branches.manage",
+    "transfers.read",
+    "transfers.write",
+    "catalog.read",
+    "catalog.write",
+    "deliveries.read",
+    "deliveries.manage",
+    "pricing.read",
+    "pricing.manage",
+    "admin.access",
+    "billing.manage"
+  ]),
+  ADMIN: new Set([
+    "products.read",
+    "products.write",
+    "customers.read",
+    "customers.write",
+    "orders.read",
+    "orders.write",
+    "orders.manage",
+    "payments.read",
+    "payments.write",
+    "inventory.read",
+    "inventory.write",
+    "reports.read",
+    "settings.read",
+    "settings.write",
+    "staff.read",
+    "staff.manage",
+    "devices.read",
+    "devices.manage",
+    "backup.manage",
+    "branches.read",
+    "branches.manage",
+    "transfers.read",
+    "transfers.write",
+    "catalog.read",
+    "catalog.write",
+    "deliveries.read",
+    "deliveries.manage",
+    "pricing.read",
+    "admin.access"
+  ]),
+  MANAGER: new Set([
+    "products.read",
+    "products.write",
+    "customers.read",
+    "customers.write",
+    "orders.read",
+    "orders.write",
+    "orders.manage",
+    "payments.read",
+    "payments.write",
+    "inventory.read",
+    "inventory.write",
+    "reports.read",
+    "settings.read",
+    "settings.write",
+    "staff.read",
+    "devices.read",
+    "devices.manage",
+    "backup.manage",
+    "branches.read",
+    "transfers.read",
+    "transfers.write",
+    "catalog.read",
+    "catalog.write",
+    "deliveries.read",
+    "deliveries.manage",
+    "pricing.read"
+  ]),
+  CASHIER: new Set([
+    "products.read",
+    "customers.read",
+    "orders.read",
+    "orders.write",
+    "payments.read",
+    "payments.write",
+    "reports.read",
+    "branches.read",
+    "catalog.read"
+  ]),
+  STOCK_CONTROLLER: new Set([
+    "products.read",
+    "products.write",
+    "inventory.read",
+    "inventory.write",
+    "transfers.read",
+    "transfers.write",
+    "branches.read",
+    "reports.read"
+  ]),
+  DELIVERY_RIDER: new Set(["deliveries.read", "deliveries.manage"])
 };
 
 export function hasPermission(role: AuthTokenPayload["role"], permission: AppPermission): boolean {
@@ -117,4 +187,18 @@ export function requirePermission(permission: AppPermission) {
 
     next();
   };
+}
+
+export function requirePlatformAccess(req: Request, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+
+  if (!req.user.platformAccess && req.user.role !== "OWNER") {
+    res.status(403).json({ message: "Forbidden: platform access required" });
+    return;
+  }
+
+  next();
 }

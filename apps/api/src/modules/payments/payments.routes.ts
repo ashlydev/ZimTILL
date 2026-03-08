@@ -36,7 +36,11 @@ paymentsRouter.get(
   requirePermission("payments.read"),
   asyncHandler(async (req, res) => {
     const payments = await prisma.payment.findMany({
-      where: { merchantId: req.user!.merchantId, deletedAt: null },
+      where: {
+        merchantId: req.user!.merchantId,
+        ...(req.user!.branchId ? { branchId: req.user!.branchId } : {}),
+        deletedAt: null
+      },
       orderBy: { paidAt: "desc" }
     });
 
@@ -63,6 +67,7 @@ paymentsRouter.post(
       data: {
         id: randomUUID(),
         merchantId,
+        branchId: order.branchId ?? req.user!.branchId ?? null,
         orderId: body.orderId,
         amount: body.amount,
         method: body.method,
@@ -102,7 +107,10 @@ paymentsRouter.post(
     })
   ),
   asyncHandler(async (req, res) => {
-    const result = await initiatePaynow(prisma, req.user!.merchantId, req.user!.identifier, req.body);
+    const result = await initiatePaynow(prisma, req.user!.merchantId, req.user!.identifier, {
+      ...(req.body as Record<string, unknown>),
+      branchId: req.user!.branchId ?? null
+    });
 
     await recordAudit(prisma, req.user!, {
       action: "payment.paynowInitiate",

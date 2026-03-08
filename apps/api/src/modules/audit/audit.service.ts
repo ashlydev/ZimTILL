@@ -14,6 +14,7 @@ export async function recordAudit(prisma: PrismaClient, auth: AuthTokenPayload, 
     await prisma.auditLog.create({
       data: {
         merchantId: auth.merchantId,
+        branchId: auth.branchId ?? null,
         userId: auth.userId,
         action: input.action,
         entityType: input.entityType,

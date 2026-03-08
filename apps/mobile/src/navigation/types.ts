@@ -18,6 +18,7 @@ export type MainStackParamList = {
   PaynowCheckout: { orderId: string; amount: number };
   Inventory: undefined;
   Reports: undefined;
+  Deliveries: undefined;
   Settings: undefined;
   Help: undefined;
 };

@@ -12,6 +12,7 @@ import { validateBody } from "../../middleware/validate";
 import { toPlain } from "../../lib/serialization";
 import { recordAudit } from "../audit/audit.service";
 import { syncLegacyUserAuth } from "../auth/auth.service";
+import { assertPlanLimit } from "../platform/platform.service";
 
 const settingsUpdateSchema = z.object({
   businessName: z.string().trim().min(2).max(120).optional(),
@@ -26,11 +27,11 @@ const settingsUpdateSchema = z.object({
 const createStaffSchema = z.object({
   identifier: identifierSchema,
   pin: pinSchema,
-  role: z.enum(["OWNER", "MANAGER", "CASHIER"]).default("CASHIER")
+  role: z.enum(["OWNER", "ADMIN", "MANAGER", "CASHIER", "STOCK_CONTROLLER", "DELIVERY_RIDER"]).default("CASHIER")
 });
 
 const updateStaffRoleSchema = z.object({
-  role: z.enum(["OWNER", "MANAGER", "CASHIER"])
+  role: z.enum(["OWNER", "ADMIN", "MANAGER", "CASHIER", "STOCK_CONTROLLER", "DELIVERY_RIDER"])
 });
 
 const resetStaffPinSchema = z.object({
@@ -227,9 +228,10 @@ settingsRouter.get(
 
 settingsRouter.post(
   "/staff",
-  requireRole(["OWNER"]),
+  requireRole(["OWNER", "ADMIN"]),
   validateBody(createStaffSchema),
   asyncHandler(async (req, res) => {
+    await assertPlanLimit(prisma, req.user!.merchantId, "users");
     const body = req.body as z.infer<typeof createStaffSchema>;
     const merchantId = req.user!.merchantId;
 
@@ -254,6 +256,7 @@ settingsRouter.post(
           id: randomUUID(),
           merchantId,
           roleId: roleModel.id,
+          defaultBranchId: req.user!.branchId ?? null,
           identifier: body.identifier,
           pinHash,
           role: body.role as RoleType,
@@ -286,7 +289,7 @@ settingsRouter.post(
 
 settingsRouter.put(
   "/staff/:id/role",
-  requireRole(["OWNER"]),
+  requireRole(["OWNER", "ADMIN"]),
   validateBody(updateStaffRoleSchema),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
@@ -332,7 +335,7 @@ settingsRouter.put(
 
 settingsRouter.post(
   "/staff/:id/reset-pin",
-  requireRole(["OWNER"]),
+  requireRole(["OWNER", "ADMIN"]),
   validateBody(resetStaffPinSchema),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
@@ -379,7 +382,7 @@ settingsRouter.post(
 
 settingsRouter.post(
   "/staff/:id/deactivate",
-  requireRole(["OWNER"]),
+  requireRole(["OWNER", "ADMIN"]),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
 
@@ -433,7 +436,7 @@ settingsRouter.post(
 
 settingsRouter.post(
   "/staff/:id/reactivate",
-  requireRole(["OWNER"]),
+  requireRole(["OWNER", "ADMIN"]),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
 

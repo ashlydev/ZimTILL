@@ -44,6 +44,27 @@ describe("sync service", () => {
     expect(state.products).toHaveLength(1);
   });
 
+  it("rejects cross-tenant payloads during push", async () => {
+    const { prisma, state } = createInMemoryPrisma();
+    const merchantId = randomUUID();
+
+    const operation = {
+      opId: randomUUID(),
+      entityType: "product",
+      opType: "UPSERT",
+      entityId: randomUUID(),
+      payload: sampleProduct(randomUUID()),
+      clientUpdatedAt: new Date().toISOString()
+    } as const;
+
+    const result = await handleSyncPush(prisma as never, merchantId, { operations: [operation] });
+
+    expect(result.acceptedOpIds).toHaveLength(0);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]?.reason).toContain("Cross-tenant payload rejected");
+    expect(state.products).toHaveLength(0);
+  });
+
   it("returns only merchant-scoped data for pull", async () => {
     const { prisma, state } = createInMemoryPrisma();
     const merchantA = randomUUID();

@@ -1,16 +1,26 @@
 import type {
   BackupPayload,
+  Branch,
+  CatalogPublicPayload,
+  CatalogSettings,
   Customer,
+  Delivery,
   DeviceSession,
+  FeatureFlag,
+  Merchant,
   Order,
   Payment,
+  Plan,
   Product,
   ReceiptData,
   ReportsSummary,
   Role,
   Settings,
   StaffUser,
-  StockMovement
+  StockMovement,
+  StockTransfer,
+  Subscription,
+  UsageCounter
 } from "../types";
 
 const ENV_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").trim();
@@ -23,7 +33,9 @@ function getDefaultApiBaseUrl(): string {
   return "https://novoriq-api.onrender.com";
 }
 
-const API_BASE_URL = (ENV_API_BASE_URL || getDefaultApiBaseUrl()).replace(/\/$/, "");
+function resolveApiBaseUrl(): string {
+  return (ENV_API_BASE_URL || getDefaultApiBaseUrl()).replace(/\/$/, "");
+}
 
 type RequestOptions = RequestInit & {
   token?: string | null;
@@ -40,12 +52,13 @@ export class ApiError extends Error {
 }
 
 export function getApiBaseUrl(): string {
-  return API_BASE_URL;
+  return resolveApiBaseUrl();
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  if (!API_BASE_URL) {
-    throw new ApiError(500, "Missing API base URL configuration");
+  const baseUrl = resolveApiBaseUrl();
+  if (!baseUrl) {
+    throw new ApiError(500, "API base URL is not configured");
   }
 
   const headers = new Headers(options.headers ?? {});
@@ -56,7 +69,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     headers.set("Authorization", `Bearer ${options.token}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers
   });
@@ -67,7 +80,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       const body = (await response.json()) as { message?: string; error?: string };
       message = body.message || body.error || message;
     } catch {
-      // keep default message
+      // Keep default message.
     }
     throw new ApiError(response.status, message);
   }
@@ -83,6 +96,7 @@ export type LoginPayload = {
   identifier: string;
   pin: string;
   deviceId: string;
+  branchId?: string;
 };
 
 export type RegisterPayload = {
@@ -94,19 +108,35 @@ export type RegisterPayload = {
 
 export type AuthResponse = {
   token: string;
-  merchant: { id: string; name: string };
-  user: { id: string; identifier: string; role: Role; isActive?: boolean };
+  merchant: Merchant;
+  user: { id: string; identifier: string; role: Role; isActive?: boolean; isPlatformAdmin?: boolean };
+  activeBranchId?: string | null;
 };
 
 export type MeResponse = {
-  user: { id: string; identifier: string; role: Role; isActive?: boolean };
-  merchant: { id: string; name: string };
+  user: { id: string; identifier: string; role: Role; isActive?: boolean; isPlatformAdmin?: boolean };
+  merchant: Merchant;
   settings?: Settings | null;
+  branches?: Branch[];
+  activeBranchId?: string | null;
+  subscription?: Subscription | null;
+  featureFlags?: FeatureFlag[];
+};
+
+export type SubscriptionSnapshot = {
+  subscription?: Subscription | null;
+  usageCounters: UsageCounter[];
+  current: {
+    products: number;
+    users: number;
+    branches: number;
+    devices: number;
+  };
 };
 
 export const api = {
   get health() {
-    return apiRequest<{ ok: boolean; service: string; time: string }>("/health");
+    return apiRequest<{ ok: boolean; service: string; version?: string; time: string }>("/health");
   },
   login(payload: LoginPayload) {
     return apiRequest<AuthResponse>("/auth/login", { method: "POST", body: JSON.stringify(payload) });
@@ -124,10 +154,35 @@ export const api = {
       body: JSON.stringify({ deviceId })
     });
   },
-  listProducts(token: string, search = "", lowStockOnly = false) {
+  listBranches(token: string) {
+    return apiRequest<{ branches: Branch[] }>("/branches", { token });
+  },
+  createBranch(token: string, payload: { name: string; address?: string; phone?: string }) {
+    return apiRequest<{ branch: Branch }>("/branches", {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload)
+    });
+  },
+  updateBranch(token: string, id: string, payload: Partial<{ name: string; address?: string; phone?: string }>) {
+    return apiRequest<{ branch: Branch }>(`/branches/${id}`, {
+      method: "PUT",
+      token,
+      body: JSON.stringify(payload)
+    });
+  },
+  switchBranch(token: string, branchId: string) {
+    return apiRequest<{ branch: Branch; token: string; activeBranchId: string }>("/branches/select", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ branchId })
+    });
+  },
+  listProducts(token: string, search = "", lowStockOnly = false, branchId?: string | null) {
     const params = new URLSearchParams();
     if (search.trim()) params.set("search", search.trim());
     if (lowStockOnly) params.set("lowStock", "true");
+    if (branchId) params.set("branchId", branchId);
     return apiRequest<{ products: Product[] }>(`/products${params.toString() ? `?${params.toString()}` : ""}`, { token });
   },
   createProduct(token: string, payload: Partial<Product>) {
@@ -176,9 +231,10 @@ export const api = {
   deleteCustomer(token: string, id: string) {
     return apiRequest<{ customer: Customer }>(`/customers/${id}`, { method: "DELETE", token });
   },
-  listOrders(token: string, search = "") {
+  listOrders(token: string, search = "", branchId?: string | null) {
     const params = new URLSearchParams();
     if (search.trim()) params.set("search", search.trim());
+    if (branchId) params.set("branchId", branchId);
     return apiRequest<{ orders: Order[] }>(`/orders${params.toString() ? `?${params.toString()}` : ""}`, { token });
   },
   createOrder(
@@ -218,10 +274,7 @@ export const api = {
   listPayments(token: string) {
     return apiRequest<{ payments: Payment[] }>("/payments", { token });
   },
-  createPayment(
-    token: string,
-    payload: { orderId: string; amount: number; method: string; reference?: string; paidAt?: string }
-  ) {
+  createPayment(token: string, payload: { orderId: string; amount: number; method: string; reference?: string; paidAt?: string }) {
     return apiRequest<{ payment: Payment }>("/payments", {
       method: "POST",
       token,
@@ -245,14 +298,56 @@ export const api = {
       body: JSON.stringify({ transactionId })
     });
   },
-  listMovements(token: string) {
-    return apiRequest<{ movements: StockMovement[] }>("/inventory/movements", { token });
+  listMovements(token: string, branchId?: string | null) {
+    const params = new URLSearchParams();
+    if (branchId) params.set("branchId", branchId);
+    return apiRequest<{ movements: StockMovement[] }>(`/inventory/movements${params.toString() ? `?${params.toString()}` : ""}`, { token });
   },
-  getLowStock(token: string) {
-    return apiRequest<{ products: Product[]; lowStockCount: number }>("/inventory/low-stock", { token });
+  getLowStock(token: string, branchId?: string | null) {
+    const params = new URLSearchParams();
+    if (branchId) params.set("branchId", branchId);
+    return apiRequest<{ products: Product[]; lowStockCount: number }>(`/inventory/low-stock${params.toString() ? `?${params.toString()}` : ""}`, { token });
   },
-  getReports(token: string) {
-    return apiRequest<ReportsSummary>("/reports/summary", { token });
+  getReports(token: string, branchId?: string | null) {
+    const params = new URLSearchParams();
+    if (branchId) params.set("branchId", branchId);
+    return apiRequest<ReportsSummary>(`/reports/summary${params.toString() ? `?${params.toString()}` : ""}`, { token });
+  },
+  listTransfers(token: string) {
+    return apiRequest<{ transfers: StockTransfer[] }>("/transfers", { token });
+  },
+  createTransfer(
+    token: string,
+    payload: { fromBranchId: string; toBranchId: string; notes?: string; items: Array<{ productId: string; quantity: number }> }
+  ) {
+    return apiRequest<{ transfer: StockTransfer }>("/transfers", {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload)
+    });
+  },
+  approveTransfer(token: string, id: string) {
+    return apiRequest<{ transfer: StockTransfer }>(`/transfers/${id}/approve`, { method: "POST", token });
+  },
+  receiveTransfer(token: string, id: string) {
+    return apiRequest<{ transfer: StockTransfer }>(`/transfers/${id}/receive`, { method: "POST", token });
+  },
+  listDeliveries(token: string) {
+    return apiRequest<{ deliveries: Delivery[] }>("/deliveries", { token });
+  },
+  assignDelivery(token: string, payload: { orderId: string; assignedToUserId?: string | null }) {
+    return apiRequest<{ delivery: Delivery }>("/deliveries/assign", {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload)
+    });
+  },
+  updateDeliveryStatus(token: string, id: string, payload: { status: Delivery["status"]; proofPhotoUrl?: string }) {
+    return apiRequest<{ delivery: Delivery }>(`/deliveries/${id}/status`, {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload)
+    });
   },
   getSettings(token: string) {
     return apiRequest<{ settings: Settings }>("/settings", { token });
@@ -317,6 +412,80 @@ export const api = {
       method: "POST",
       token,
       body: JSON.stringify({ backup })
+    });
+  },
+  listPlans() {
+    return apiRequest<{ plans: Plan[] }>("/subscriptions/plans");
+  },
+  getSubscriptionSnapshot(token: string) {
+    return apiRequest<SubscriptionSnapshot>("/subscriptions/current", { token });
+  },
+  requestUpgrade(token: string, payload: { requestedPlanCode: "STARTER" | "PRO" | "BUSINESS" | "ENTERPRISE"; notes?: string }) {
+    return apiRequest<{ request: Record<string, unknown> }>("/subscriptions/request-upgrade", {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload)
+    });
+  },
+  getCatalogSettings(token: string) {
+    return apiRequest<{ settings: CatalogSettings | null }>("/catalog/settings/me", { token });
+  },
+  updateCatalogSettings(token: string, payload: Partial<CatalogSettings>) {
+    return apiRequest<{ settings: CatalogSettings }>("/catalog/settings/me", {
+      method: "PUT",
+      token,
+      body: JSON.stringify(payload)
+    });
+  },
+  getPublicCatalog(merchantSlug: string) {
+    return apiRequest<CatalogPublicPayload>(`/catalog/${merchantSlug}`);
+  },
+  checkoutPublicCatalog(
+    merchantSlug: string,
+    payload: {
+      customerName: string;
+      customerPhone: string;
+      notes?: string;
+      items: Array<{ productId: string; quantity: number }>;
+      paymentMode?: "ECOCASH" | "PAY_LATER";
+    }
+  ) {
+    return apiRequest<{ customer: Customer; order: Order; paynow: Record<string, unknown> | null }>(`/catalog/${merchantSlug}/checkout`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  getAdminOverview(token: string) {
+    return apiRequest<{
+      totals: { merchants: number; openUpgradeRequests: number };
+      subscriptions: Subscription[];
+    }>("/admin/overview", { token });
+  },
+  listAdminMerchants(token: string) {
+    return apiRequest<{ merchants: Array<Merchant & { subscriptions?: Subscription[]; usageCounters?: UsageCounter[] }> }>("/admin/merchants", { token });
+  },
+  listAdminFeatureFlags(token: string) {
+    return apiRequest<{ flags: FeatureFlag[] }>("/admin/feature-flags", { token });
+  },
+  adminDisableUser(token: string, userId: string, isActive: boolean) {
+    return apiRequest<{ user: StaffUser }>("/admin/support/disable-user", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ userId, isActive })
+    });
+  },
+  adminResetPin(token: string, userId: string, pin: string) {
+    return apiRequest<{ success: boolean }>("/admin/support/reset-pin", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ userId, pin })
+    });
+  },
+  adminImpersonate(token: string, payload: { merchantId: string; userId?: string }) {
+    return apiRequest<{ token: string; user: StaffUser }>("/admin/support/impersonate", {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload)
     });
   }
 };
