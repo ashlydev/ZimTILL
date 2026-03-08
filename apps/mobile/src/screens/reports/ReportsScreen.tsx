@@ -5,7 +5,7 @@ import { Screen } from "../../components/Screen";
 import { useAuth } from "../../contexts/AuthContext";
 import { getReports, getSettings } from "../../data/repository";
 import { useRefreshOnFocus } from "../../hooks/useRefreshOnFocus";
-import { colors } from "../../constants/theme";
+import { colors, spacing } from "../../constants/theme";
 import { formatMoney } from "../../utils/format";
 
 export function ReportsScreen() {
@@ -51,10 +51,24 @@ export function ReportsScreen() {
       </Card>
 
       <Card>
-        <Text style={styles.sectionTitle}>Returns / Expired</Text>
-        <Text style={styles.meta}>Returns: {data.returnsExpired.returnsCount}</Text>
-        <Text style={styles.meta}>Expired: {data.returnsExpired.expiredCount}</Text>
-        <Text style={styles.meta}>Damaged: {data.returnsExpired.damagedCount}</Text>
+        <Text style={styles.sectionTitle}>Stock Losses & Returns</Text>
+        <View style={styles.summaryGrid}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Returned</Text>
+            <Text style={styles.summaryValue}>{data.returnsExpired.returnsCount}</Text>
+            <Text style={styles.meta}>{formatMoney(data.returnsExpired.returnsValue, symbol)}</Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Expired</Text>
+            <Text style={styles.summaryValue}>{data.returnsExpired.expiredCount}</Text>
+            <Text style={styles.meta}>{formatMoney(data.returnsExpired.expiredValue, symbol)}</Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Damaged</Text>
+            <Text style={styles.summaryValue}>{data.returnsExpired.damagedCount}</Text>
+            <Text style={styles.meta}>{formatMoney(data.returnsExpired.damagedValue, symbol)}</Text>
+          </View>
+        </View>
       </Card>
 
       <Card>
@@ -96,5 +110,32 @@ const styles = StyleSheet.create({
   meta: {
     color: colors.slate,
     fontSize: 13
+  },
+  summaryGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm
+  },
+  summaryCard: {
+    minWidth: 120,
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    padding: spacing.md,
+    gap: 4,
+    backgroundColor: colors.background
+  },
+  summaryLabel: {
+    color: colors.slate,
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.5
+  },
+  summaryValue: {
+    color: colors.navy,
+    fontSize: 24,
+    fontWeight: "800"
   }
 });

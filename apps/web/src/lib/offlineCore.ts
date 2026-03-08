@@ -188,6 +188,14 @@ function confirmedAtForStatus(status: string, current: string | null | undefined
   return null;
 }
 
+function productNotFoundError() {
+  return new Error("This product is no longer available. Remove it and try again.");
+}
+
+function insufficientStockError(productName: string, available: number) {
+  return new Error(`Insufficient stock for ${productName}. Only ${available} left.`);
+}
+
 function transactionDone(transaction: IDBTransaction) {
   return new Promise<void>((resolve, reject) => {
     transaction.oncomplete = () => resolve();
@@ -425,10 +433,8 @@ async function updateOrderTotalsFromPayments(orderId: string) {
     if (["PAID", "PARTIALLY_PAID"].includes(order.status)) {
       nextStatus = "CONFIRMED";
     }
-  } else if (paid >= Number(order.total)) {
-    nextStatus = "PAID";
-  } else {
-    nextStatus = "PARTIALLY_PAID";
+  } else if (["CONFIRMED", "PARTIALLY_PAID", "PAID"].includes(order.status)) {
+    nextStatus = paid >= Number(order.total) ? "PAID" : "PARTIALLY_PAID";
   }
 
   if (nextStatus !== order.status) {
@@ -737,7 +743,7 @@ export async function createOrderLocal(input: CreateOrderInput) {
   for (const rawItem of input.items) {
     const product = await getProductById(context.merchantId, rawItem.productId);
     if (!product) {
-      throw new Error("One or more selected products are unavailable");
+      throw productNotFoundError();
     }
 
     const lineTotal = Number(product.price) * Number(rawItem.quantity);
@@ -831,7 +837,7 @@ export async function getOrderDetailsLocal(orderId: string): Promise<OrderDetail
         merchantId: context.merchantId,
         branchId: order.branchId ?? context.activeBranchId,
         createdAt: item.createdAt,
-        name: "Deleted product",
+        name: "Unavailable product",
         price: Number(item.unitPrice),
         cost: null,
         sku: null,
@@ -897,6 +903,19 @@ export async function confirmOrderLocal(orderId: string) {
   }
 
   const confirmedAt = nowIso();
+  for (const item of details.order.items) {
+    const product = await getProductById(context.merchantId, item.productId);
+    if (!product) {
+      throw productNotFoundError();
+    }
+
+    const available = Number(product.stockQty);
+    const required = Number(item.quantity);
+    if (available < required) {
+      throw insufficientStockError(product.name, available);
+    }
+  }
+
   const nextOrder: Order = {
     ...details.order,
     status: "CONFIRMED",
@@ -912,7 +931,9 @@ export async function confirmOrderLocal(orderId: string) {
 
   for (const item of details.order.items) {
     const product = await getProductById(context.merchantId, item.productId);
-    if (!product) continue;
+    if (!product) {
+      throw productNotFoundError();
+    }
 
     await saveProductLocal({
       id: product.id,
@@ -1129,11 +1150,11 @@ export async function getReportsLocal(): Promise<ReportsSummary> {
   for (const item of filteredItems) {
     if (!inRange(item.createdAt, sevenDaysAgo)) continue;
     const product = productById.get(item.productId);
-    const current = topProductMap.get(item.productId) ?? {
-      productId: item.productId,
-      name: product?.name ?? "Deleted product",
-      qty: 0
-    };
+      const current = topProductMap.get(item.productId) ?? {
+        productId: item.productId,
+        name: product?.name ?? "Unavailable product",
+        qty: 0
+      };
     current.qty += Number(item.quantity);
     topProductMap.set(item.productId, current);
   }

@@ -8,6 +8,7 @@ import { AppButton } from "../../components/AppButton";
 import { StatusBadge } from "../../components/StatusBadge";
 import { colors, spacing } from "../../constants/theme";
 import { useAuth } from "../../contexts/AuthContext";
+import { useAppContext } from "../../contexts/AppContext";
 import {
   addPayment,
   buildWhatsappOrderText,
@@ -29,6 +30,7 @@ function toneFromStatus(status: string): "neutral" | "success" | "warning" | "da
 
 export function OrderDetailsScreen({ route, navigation }: Props) {
   const { session } = useAuth();
+  const { isOnline } = useAppContext();
   const [details, setDetails] = useState<Awaited<ReturnType<typeof getOrderDetails>> | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"CASH" | "ECOCASH" | "ZIPIT" | "BANK_TRANSFER" | "OTHER">("CASH");
@@ -49,19 +51,23 @@ export function OrderDetailsScreen({ route, navigation }: Props) {
       return;
     }
 
-    await addPayment(
-      { merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId },
-      {
-        orderId: String(details.order.id),
-        amount: Number(paymentAmount),
-        method: paymentMethod,
-        reference: paymentReference || null
-      }
-    );
+    try {
+      await addPayment(
+        { merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId },
+        {
+          orderId: String(details.order.id),
+          amount: Number(paymentAmount),
+          method: paymentMethod,
+          reference: paymentReference || null
+        }
+      );
 
-    setPaymentAmount("");
-    setPaymentReference("");
-    await load();
+      setPaymentAmount("");
+      setPaymentReference("");
+      await load();
+    } catch (error) {
+      Alert.alert("Payment not saved", error instanceof Error ? error.message : "Try again.");
+    }
   };
 
   const onShareWhatsapp = async () => {
@@ -88,6 +94,7 @@ export function OrderDetailsScreen({ route, navigation }: Props) {
   }
 
   const order = details.order;
+  const hasUnavailableItems = details.items.some((item) => !item.productName);
 
   return (
     <Screen>
@@ -113,9 +120,10 @@ export function OrderDetailsScreen({ route, navigation }: Props) {
         <Text style={styles.sectionTitle}>Items</Text>
         {details.items.map((item) => (
           <Text key={String(item.id)} style={styles.meta}>
-            {Number(item.quantity)}x {String(item.productName)} @ {formatMoney(Number(item.unitPrice))} = {formatMoney(Number(item.lineTotal))}
+            {Number(item.quantity)}x {String(item.productName ?? "Unavailable product")} @ {formatMoney(Number(item.unitPrice))} = {formatMoney(Number(item.lineTotal))}
           </Text>
         ))}
+        {hasUnavailableItems ? <Text style={styles.warning}>One or more items are unavailable. Fix the order before confirming it.</Text> : null}
       </Card>
 
       <Card>
@@ -133,9 +141,13 @@ export function OrderDetailsScreen({ route, navigation }: Props) {
         <View style={styles.row}>
           <AppButton label="Mark confirmed" variant="secondary" onPress={async () => {
             if (!session) return;
-            await confirmOrder({ merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId }, route.params.orderId);
-            await load();
-          }} />
+            try {
+              await confirmOrder({ merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId }, route.params.orderId);
+              await load();
+            } catch (error) {
+              Alert.alert("Order not confirmed", error instanceof Error ? error.message : "Try again.");
+            }
+          }} disabled={hasUnavailableItems} />
           <AppButton label="Cancel order" variant="secondary" onPress={async () => {
             if (!session) return;
             await cancelOrder({ merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId }, route.params.orderId);
@@ -148,8 +160,10 @@ export function OrderDetailsScreen({ route, navigation }: Props) {
             label="Pay with Paynow"
             variant="secondary"
             onPress={() => navigation.navigate("PaynowCheckout", { orderId: String(order.id), amount: Number(details.balance) })}
+            disabled={!isOnline}
           />
         </View>
+        {!isOnline ? <Text style={styles.meta}>Online payments require internet.</Text> : null}
       </Card>
 
       <Card>
@@ -228,6 +242,11 @@ const styles = StyleSheet.create({
     color: colors.dark,
     fontSize: 16,
     fontWeight: "800"
+  },
+  warning: {
+    color: colors.warning,
+    fontSize: 13,
+    fontWeight: "700"
   },
   row: {
     flexDirection: "row",

@@ -40,6 +40,20 @@ export function OrderCreateScreen({ navigation }: Props) {
     () => Object.values(quantities).filter((value) => Number(value) > 0).length,
     [quantities]
   );
+  const subtotal = useMemo(
+    () =>
+      products.reduce((sum, product) => {
+        const qty = Number(quantities[String(product.id)] ?? "0");
+        return qty > 0 ? sum + Number(product.price) * qty : sum;
+      }, 0),
+    [products, quantities]
+  );
+  const resolvedDiscountAmount = useMemo(() => {
+    const amount = Number(discountAmount || 0);
+    if (amount > 0) return amount;
+    return subtotal * (Number(discountPercent || 0) / 100);
+  }, [discountAmount, discountPercent, subtotal]);
+  const total = useMemo(() => Math.max(subtotal - resolvedDiscountAmount, 0), [resolvedDiscountAmount, subtotal]);
 
   const onCreate = async () => {
     if (!session) return;
@@ -152,6 +166,13 @@ export function OrderCreateScreen({ navigation }: Props) {
           placeholder="Notes"
           placeholderTextColor={colors.slate}
         />
+      </Card>
+
+      <Card>
+        <Text style={styles.sectionTitle}>Totals</Text>
+        <Text style={styles.productMeta}>Subtotal: ${subtotal.toFixed(2)}</Text>
+        <Text style={styles.productMeta}>Discount: ${resolvedDiscountAmount.toFixed(2)}</Text>
+        <Text style={styles.productName}>Total: ${total.toFixed(2)}</Text>
       </Card>
 
       <AppButton label="Create order" onPress={onCreate} />

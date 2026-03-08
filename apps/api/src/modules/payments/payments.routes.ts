@@ -58,7 +58,7 @@ paymentsRouter.post(
 
     const order = await prisma.order.findFirst({ where: { id: body.orderId, merchantId, deletedAt: null } });
     if (!order) {
-      throw new HttpError(404, "Order not found");
+      throw new HttpError(404, "The order no longer exists. Refresh and try again.", "ORDER_NOT_FOUND");
     }
 
     const now = new Date();

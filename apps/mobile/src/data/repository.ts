@@ -112,6 +112,14 @@ function parseAdjustmentReason(reason: string | null | undefined): InventoryAdju
   return null;
 }
 
+function productNotFoundError() {
+  return new Error("This product is no longer available. Remove it from the order and try again.");
+}
+
+function insufficientStockError(productName: string, available: number) {
+  return new Error(`Insufficient stock for ${productName}. Only ${available} left.`);
+}
+
 async function enqueue(
   context: SessionContext,
   entityType: string,
@@ -540,7 +548,7 @@ export async function createOrder(context: SessionContext, input: CreateOrderInp
     );
 
     if (!product) {
-      throw new Error("Product unavailable for order");
+      throw productNotFoundError();
     }
 
     subtotal += Number(product.price) * item.quantity;
@@ -632,7 +640,7 @@ export async function getOrderDetails(
   const items = await db.getAllAsync<Record<string, unknown>>(
     `SELECT oi.*, p.name as product_name
      FROM order_items oi
-     JOIN products p ON p.id = oi.product_id
+     LEFT JOIN products p ON p.id = oi.product_id AND p.deleted_at IS NULL
      WHERE oi.merchant_id = ? AND oi.order_id = ? AND oi.deleted_at IS NULL
      ORDER BY oi.created_at ASC;`,
     [merchantId, orderId]
@@ -755,7 +763,23 @@ export async function confirmOrder(context: SessionContext, orderId: string): Pr
   for (const row of items) {
     const item = toCamel(row);
     const product = await getProductById(context.merchantId, String(item.productId));
-    if (!product) continue;
+    if (!product) {
+      throw productNotFoundError();
+    }
+
+    const available = Number(product.stockQty);
+    const required = Number(item.quantity);
+    if (available < required) {
+      throw insufficientStockError(String(product.name), available);
+    }
+  }
+
+  for (const row of items) {
+    const item = toCamel(row);
+    const product = await getProductById(context.merchantId, String(item.productId));
+    if (!product) {
+      throw productNotFoundError();
+    }
 
     await saveProduct(context, {
       id: String(product.id),
@@ -844,10 +868,12 @@ async function updateOrderPaymentStatus(context: SessionContext, orderId: string
     if (["PAID", "PARTIALLY_PAID"].includes(nextStatus)) {
       nextStatus = "CONFIRMED";
     }
-  } else if (details.paid >= Number(order.total)) {
-    nextStatus = "PAID";
-  } else if (details.paid > 0) {
-    nextStatus = "PARTIALLY_PAID";
+  } else if (["CONFIRMED", "PARTIALLY_PAID", "PAID"].includes(nextStatus)) {
+    if (details.paid >= Number(order.total)) {
+      nextStatus = "PAID";
+    } else {
+      nextStatus = "PARTIALLY_PAID";
+    }
   }
 
   if (nextStatus !== order.status) {

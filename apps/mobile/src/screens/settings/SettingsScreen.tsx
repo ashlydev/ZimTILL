@@ -1,9 +1,12 @@
 import React, { useCallback, useState } from "react";
 import { Alert, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Screen } from "../../components/Screen";
 import { Card } from "../../components/Card";
 import { AppButton } from "../../components/AppButton";
 import { colors, spacing } from "../../constants/theme";
+import { useAppContext } from "../../contexts/AppContext";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   exportLocalBackup,
@@ -14,9 +17,12 @@ import {
   setFeatureFlag
 } from "../../data/repository";
 import { useRefreshOnFocus } from "../../hooks/useRefreshOnFocus";
+import { MainStackParamList } from "../../navigation/types";
 
 export function SettingsScreen() {
   const { session, logout } = useAuth();
+  const { isOnline, syncing, lastSyncAt, syncError } = useAppContext();
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const [businessName, setBusinessName] = useState("");
   const [currencyCode, setCurrencyCode] = useState<"USD" | "ZWL">("USD");
   const [currencySymbol, setCurrencySymbol] = useState("$");
@@ -149,6 +155,14 @@ export function SettingsScreen() {
       </Card>
 
       <Card>
+        <Text style={styles.sectionTitle}>Sync</Text>
+        <Text style={styles.meta}>Status: {isOnline ? "Online" : "Offline"}</Text>
+        <Text style={styles.meta}>Last sync: {lastSyncAt ? new Date(lastSyncAt).toLocaleString() : "Never"}</Text>
+        {syncError ? <Text style={styles.error}>Last error: {syncError}</Text> : null}
+        <AppButton label={syncing ? "Syncing..." : "Open Sync Status"} variant="secondary" onPress={() => navigation.navigate("SyncStatus")} />
+      </Card>
+
+      <Card>
         <Text style={styles.sectionTitle}>Backup + Restore (Local)</Text>
         <Text style={styles.meta}>Export JSON to share/store securely. Import merges backup into local store.</Text>
         <View style={styles.row}>
@@ -209,6 +223,11 @@ const styles = StyleSheet.create({
     color: colors.slate,
     fontSize: 12,
     flex: 1
+  },
+  error: {
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: "700"
   },
   textInput: {
     borderWidth: 1,

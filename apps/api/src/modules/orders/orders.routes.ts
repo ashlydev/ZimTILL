@@ -30,6 +30,61 @@ const updateOrderSchema = z.object({
   notes: z.string().trim().max(500).nullable().optional()
 });
 
+function productNotFoundError(): HttpError {
+  return new HttpError(404, "This product is no longer available. Remove it and try again.", "PRODUCT_NOT_FOUND");
+}
+
+function insufficientStockError(productName: string, available: number): HttpError {
+  return new HttpError(409, `Insufficient stock for ${productName}. Only ${available} left.`, "INSUFFICIENT_STOCK");
+}
+
+async function loadProductsForItems(
+  merchantId: string,
+  items: Array<{ productId: string; quantity: number }>
+) {
+  const uniqueIds = [...new Set(items.map((item) => item.productId))];
+  const products = await prisma.product.findMany({
+    where: {
+      id: { in: uniqueIds },
+      merchantId,
+      deletedAt: null
+    }
+  });
+
+  if (products.length !== uniqueIds.length) {
+    throw productNotFoundError();
+  }
+
+  return new Map(products.map((item) => [item.id, item]));
+}
+
+function calculateOrderTotals(
+  items: Array<{ productId: string; quantity: number }>,
+  productById: Map<string, { price: unknown }>,
+  discountAmount?: number,
+  discountPercent?: number
+) {
+  const subtotal = items.reduce((sum, item) => {
+    const product = productById.get(item.productId);
+    if (!product) {
+      throw productNotFoundError();
+    }
+    return sum + Number(product.price) * item.quantity;
+  }, 0);
+
+  const resolvedDiscountPercent = Number(discountPercent ?? 0);
+  const explicitDiscountAmount = Number(discountAmount ?? 0);
+  const resolvedDiscountAmount =
+    explicitDiscountAmount > 0 ? explicitDiscountAmount : subtotal * (resolvedDiscountPercent / 100);
+
+  return {
+    subtotal,
+    discountPercent: resolvedDiscountPercent,
+    discountAmount: resolvedDiscountAmount,
+    total: Math.max(subtotal - resolvedDiscountAmount, 0)
+  };
+}
+
 export const ordersRouter = Router();
 ordersRouter.use(requireAuth);
 
@@ -70,29 +125,13 @@ ordersRouter.post(
     const deviceId = req.user!.deviceId;
     const branchId = req.user!.branchId ?? null;
     const body = req.body as z.infer<typeof createOrderSchema>;
+    const items = body.items as Array<{ productId: string; quantity: number }>;
     const now = new Date();
-
-    const products = await prisma.product.findMany({
-      where: {
-        id: { in: body.items.map((item) => item.productId) },
-        merchantId,
-        deletedAt: null
-      }
-    });
-
-    if (products.length !== body.items.length) {
-      throw new HttpError(400, "One or more selected products are unavailable");
-    }
-
-    const byId = new Map(products.map((item) => [item.id, item]));
-    const subtotal = body.items.reduce((sum, item) => {
-      const product = byId.get(item.productId)!;
-      return sum + Number(product.price) * item.quantity;
-    }, 0);
-
-    const discountPercent = body.discountPercent ?? 0;
-    const discountAmount = body.discountAmount ?? subtotal * (discountPercent / 100);
-    const total = Math.max(subtotal - discountAmount, 0);
+    const byId = await loadProductsForItems(merchantId, items);
+    const customer = body.customerId
+      ? await prisma.customer.findFirst({ where: { id: body.customerId, merchantId, deletedAt: null } })
+      : null;
+    const { subtotal, discountAmount, discountPercent, total } = calculateOrderTotals(items, byId, body.discountAmount, body.discountPercent);
 
     const orderId = randomUUID();
     const orderNumber = `NVO-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}-${Math.floor(
@@ -117,8 +156,8 @@ ordersRouter.post(
           discountPercent,
           total,
           notes: body.notes ?? null,
-          customerName: null,
-          customerPhone: null,
+          customerName: customer?.name ?? null,
+          customerPhone: customer?.phone ?? null,
           confirmedAt: null,
           createdAt: now,
           updatedAt: now,
@@ -128,8 +167,11 @@ ordersRouter.post(
       });
 
       await tx.orderItem.createMany({
-        data: body.items.map((item) => {
-          const product = byId.get(item.productId)!;
+        data: items.map((item) => {
+          const product = byId.get(item.productId);
+          if (!product) {
+            throw productNotFoundError();
+          }
           const lineTotal = Number(product.price) * item.quantity;
           return {
             id: randomUUID(),
@@ -213,6 +255,9 @@ ordersRouter.put(
     }
 
     const body = req.body as z.infer<typeof updateOrderSchema>;
+    if (body.status && ["CONFIRMED", "PARTIALLY_PAID", "PAID"].includes(body.status)) {
+      throw new HttpError(400, "Use the confirm or payment actions to move an order into a paid state.", "ORDER_STATUS_FLOW");
+    }
 
     const updated = await prisma.order.update({
       where: { id: existing.id },
@@ -257,6 +302,54 @@ ordersRouter.post(
     }
 
     const now = new Date();
+    const productIds = [...new Set(order.items.map((item) => item.productId))];
+    const products = await prisma.product.findMany({
+      where: { id: { in: productIds }, merchantId, deletedAt: null }
+    });
+    const productById = new Map(products.map((product) => [product.id, product]));
+
+    if (productById.size !== productIds.length) {
+      throw productNotFoundError();
+    }
+
+    if (order.branchId) {
+      const branchStocks = await prisma.productStock.findMany({
+        where: {
+          merchantId,
+          branchId: order.branchId,
+          productId: { in: productIds },
+          deletedAt: null
+        }
+      });
+      const branchStockByProductId = new Map(branchStocks.map((stock) => [stock.productId, stock]));
+
+      for (const item of order.items) {
+        const product = productById.get(item.productId);
+        if (!product) {
+          throw productNotFoundError();
+        }
+
+        const branchStock = branchStockByProductId.get(item.productId);
+        const available = Number(branchStock?.qty ?? product.stockQty);
+        const required = Number(item.quantity);
+        if (available < required) {
+          throw insufficientStockError(product.name, available);
+        }
+      }
+    } else {
+      for (const item of order.items) {
+        const product = productById.get(item.productId);
+        if (!product) {
+          throw productNotFoundError();
+        }
+
+        const available = Number(product.stockQty);
+        const required = Number(item.quantity);
+        if (available < required) {
+          throw insufficientStockError(product.name, available);
+        }
+      }
+    }
 
     const confirmed = await prisma.$transaction(async (tx) => {
       const next = await tx.order.update({
@@ -272,10 +365,10 @@ ordersRouter.post(
       });
 
       for (const item of order.items) {
-        const product = await tx.product.findFirst({
-          where: { id: item.productId, merchantId, deletedAt: null }
-        });
-        if (!product) continue;
+        const product = productById.get(item.productId);
+        if (!product) {
+          throw productNotFoundError();
+        }
 
         if (order.branchId) {
           const branchStock = await tx.productStock.findFirst({
@@ -285,13 +378,13 @@ ordersRouter.post(
           if (branchStock) {
             await tx.productStock.update({
               where: { id: branchStock.id },
-            data: {
-              qty: Number(branchStock.qty) - Number(item.quantity),
-              updatedAt: now,
-              version: { increment: 1 },
-              lastModifiedByDeviceId: req.user!.deviceId
-            }
-          });
+              data: {
+                qty: Number(branchStock.qty) - Number(item.quantity),
+                updatedAt: now,
+                version: { increment: 1 },
+                lastModifiedByDeviceId: req.user!.deviceId
+              }
+            });
           }
         }
 

@@ -10,7 +10,9 @@ export function validateBody(schema: Schema) {
       next();
     } catch (error) {
       if (error instanceof ZodError) {
-        res.status(400).json({ message: "Validation failed", issues: error.flatten() });
+        const firstIssue = error.issues[0];
+        const field = firstIssue?.path?.join(".") || "request";
+        res.status(400).json({ message: `Invalid ${field}. Please review the form and try again.`, code: "VALIDATION_ERROR" });
         return;
       }
       next(error);
@@ -25,7 +27,9 @@ export function validateQuery(schema: Schema) {
       next();
     } catch (error) {
       if (error instanceof ZodError) {
-        res.status(400).json({ message: "Validation failed", issues: error.flatten() });
+        const firstIssue = error.issues[0];
+        const field = firstIssue?.path?.join(".") || "request";
+        res.status(400).json({ message: `Invalid ${field}. Please review the form and try again.`, code: "VALIDATION_ERROR" });
         return;
       }
       next(error);

@@ -277,6 +277,8 @@ export function OrderDetailsPage() {
     );
   }
 
+  const hasUnavailableItems = order.items.some((item) => item.product.name === "Unavailable product");
+
   return (
     <section className="page-stack">
       <PageHeader
@@ -295,6 +297,7 @@ export function OrderDetailsPage() {
       />
 
       {error ? <p className="status-text error">{error}</p> : null}
+      {hasUnavailableItems ? <p className="status-text warning">One or more items are unavailable. Remove or replace them before confirming this order.</p> : null}
 
       <Card subtitle="Current customer and payment status" title="Summary">
         <div className="summary-grid">
@@ -333,7 +336,7 @@ export function OrderDetailsPage() {
 
       <Card title="Action Bar">
         <div className="actions-row wrap">
-          <Button disabled={busy} onClick={() => void runAction("confirm")} variant="secondary">
+          <Button disabled={busy || hasUnavailableItems} onClick={() => void runAction("confirm")} variant="secondary">
             Mark Confirmed
           </Button>
           <Button disabled={busy} onClick={() => void runAction("cancel")} variant="danger">

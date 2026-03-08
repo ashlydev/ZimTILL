@@ -21,18 +21,18 @@ export async function updateOrderPaymentStatus(
     if (order.status === "PAID" || order.status === "PARTIALLY_PAID") {
       status = "CONFIRMED";
     }
-  } else if (paid >= total) {
-    status = "PAID";
-  } else if (paid > 0) {
-    status = "PARTIALLY_PAID";
+  } else if (["CONFIRMED", "PARTIALLY_PAID", "PAID"].includes(order.status)) {
+    status = paid >= total ? "PAID" : "PARTIALLY_PAID";
   }
 
   if (status !== order.status) {
+    const now = new Date();
     await prisma.order.update({
       where: { id: order.id },
       data: {
         status,
-        updatedAt: new Date(),
+        confirmedAt: ["CONFIRMED", "PARTIALLY_PAID", "PAID"].includes(status) ? order.confirmedAt ?? now : null,
+        updatedAt: now,
         updatedByUserId: audit?.userId ?? order.updatedByUserId ?? null,
         lastModifiedByDeviceId: audit?.deviceId ?? order.lastModifiedByDeviceId,
         version: { increment: 1 }
