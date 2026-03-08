@@ -50,7 +50,7 @@ export function OrderDetailsScreen({ route, navigation }: Props) {
     }
 
     await addPayment(
-      { merchantId: session.merchantId, deviceId: session.deviceId },
+      { merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId },
       {
         orderId: String(details.order.id),
         amount: Number(paymentAmount),
@@ -133,12 +133,12 @@ export function OrderDetailsScreen({ route, navigation }: Props) {
         <View style={styles.row}>
           <AppButton label="Mark confirmed" variant="secondary" onPress={async () => {
             if (!session) return;
-            await confirmOrder({ merchantId: session.merchantId, deviceId: session.deviceId }, route.params.orderId);
+            await confirmOrder({ merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId }, route.params.orderId);
             await load();
           }} />
           <AppButton label="Cancel order" variant="secondary" onPress={async () => {
             if (!session) return;
-            await cancelOrder({ merchantId: session.merchantId, deviceId: session.deviceId }, route.params.orderId);
+            await cancelOrder({ merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId }, route.params.orderId);
             await load();
           }} />
         </View>

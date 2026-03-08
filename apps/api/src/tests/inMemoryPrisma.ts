@@ -693,6 +693,7 @@ export function createInMemoryPrisma() {
     paynowTransaction: {
       findFirst: async ({ where, orderBy }: AnyRecord = {}) =>
         sortRecords(filterByWhere(paynowTransactions, where), orderBy)[0] ?? null,
+      findMany: async ({ where, orderBy }: AnyRecord = {}) => sortRecords(filterByWhere(paynowTransactions, where), orderBy),
       create: async ({ data }: AnyRecord) => {
         const next = withDefaults(data, { id: data.id ?? randomUUID(), createdAt: new Date(), updatedAt: new Date() });
         paynowTransactions.push(next);
@@ -703,6 +704,11 @@ export function createInMemoryPrisma() {
         if (!existing) return null;
         applyData(existing, data);
         return existing;
+      },
+      updateMany: async ({ where, data }: AnyRecord) => {
+        const filtered = filterByWhere(paynowTransactions, where);
+        filtered.forEach((item) => applyData(item, data));
+        return { count: filtered.length };
       }
     },
     stockMovement: {

@@ -64,7 +64,7 @@ export function ProductsScreen() {
 
     try {
       await saveProduct(
-        { merchantId: session.merchantId, deviceId: session.deviceId },
+        { merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId },
         {
           id: editing ? String(editing.id) : undefined,
           name: name.trim(),
@@ -84,7 +84,7 @@ export function ProductsScreen() {
 
   const onAdjust = async (item: Record<string, unknown>, quantity: number) => {
     if (!session) return;
-    await adjustStock({ merchantId: session.merchantId, deviceId: session.deviceId }, String(item.id), quantity, "Quick adjust");
+    await adjustStock({ merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId }, String(item.id), quantity, "Quick adjust");
     await load();
   };
 
@@ -96,7 +96,7 @@ export function ProductsScreen() {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
-          await deleteProduct({ merchantId: session.merchantId, deviceId: session.deviceId }, String(item.id));
+          await deleteProduct({ merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId }, String(item.id));
           await load();
         }
       }

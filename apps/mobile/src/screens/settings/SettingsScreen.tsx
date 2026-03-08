@@ -49,7 +49,7 @@ export function SettingsScreen() {
   const onSave = async () => {
     if (!session) return;
     await saveSettings(
-      { merchantId: session.merchantId, deviceId: session.deviceId },
+      { merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId },
       {
         businessName,
         currencyCode,
@@ -66,7 +66,7 @@ export function SettingsScreen() {
   const toggleFlag = async (key: string) => {
     if (!session) return;
     const enabled = !Boolean(flags[key]);
-    await setFeatureFlag({ merchantId: session.merchantId, deviceId: session.deviceId }, key, enabled);
+    await setFeatureFlag({ merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId }, key, enabled);
     setFlags((prev) => ({ ...prev, [key]: enabled }));
   };
 
@@ -90,7 +90,7 @@ export function SettingsScreen() {
 
     try {
       const parsed = JSON.parse(backupJson) as Record<string, unknown>;
-      await importLocalBackup({ merchantId: session.merchantId, deviceId: session.deviceId }, parsed);
+      await importLocalBackup({ merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId }, parsed);
       Alert.alert("Imported", "Backup merged into local data.");
       await load();
     } catch {

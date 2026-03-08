@@ -1,6 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 
-export async function updateOrderPaymentStatus(prisma: PrismaClient, orderId: string, merchantId: string): Promise<void> {
+export async function updateOrderPaymentStatus(
+  prisma: PrismaClient,
+  orderId: string,
+  merchantId: string,
+  audit?: { userId?: string | null; deviceId?: string | null }
+): Promise<void> {
   const order = await prisma.order.findFirst({ where: { id: orderId, merchantId, deletedAt: null } });
   if (!order) return;
 
@@ -28,6 +33,8 @@ export async function updateOrderPaymentStatus(prisma: PrismaClient, orderId: st
       data: {
         status,
         updatedAt: new Date(),
+        updatedByUserId: audit?.userId ?? order.updatedByUserId ?? null,
+        lastModifiedByDeviceId: audit?.deviceId ?? order.lastModifiedByDeviceId,
         version: { increment: 1 }
       }
     });

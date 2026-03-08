@@ -74,7 +74,14 @@ function toJsonValue(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 
-async function applyPaidStatus(prisma: PrismaClient, merchantId: string, transactionId: string, deviceId = "server-sync") {
+async function applyPaidStatus(
+  prisma: PrismaClient,
+  merchantId: string,
+  transactionId: string,
+  options: { deviceId?: string; userId?: string } = {}
+) {
+  const deviceId = options.deviceId ?? "server-sync";
+  const userId = options.userId ?? null;
   const txn = await prisma.paynowTransaction.findFirst({
     where: { id: transactionId, merchantId, deletedAt: null }
   });
@@ -100,6 +107,7 @@ async function applyPaidStatus(prisma: PrismaClient, merchantId: string, transac
           status: "CONFIRMED",
           method: "PAYNOW",
           updatedAt: new Date(),
+          updatedByUserId: userId,
           version: { increment: 1 },
           lastModifiedByDeviceId: deviceId
         }
@@ -112,6 +120,8 @@ async function applyPaidStatus(prisma: PrismaClient, merchantId: string, transac
             id: randomUUID(),
             merchantId,
             orderId: txn.orderId,
+            createdByUserId: userId,
+            updatedByUserId: userId,
             amount: txn.amount,
             method: "PAYNOW",
             reference: txn.reference,
@@ -133,11 +143,16 @@ async function applyPaidStatus(prisma: PrismaClient, merchantId: string, transac
 
     await tx.paynowTransaction.update({
       where: { id: txn.id },
-      data: { status: "PAID", updatedAt: new Date() }
+      data: {
+        status: "PAID",
+        updatedAt: new Date(),
+        updatedByUserId: userId,
+        lastModifiedByDeviceId: deviceId
+      }
     });
   });
 
-  await updateOrderPaymentStatus(prisma, txn.orderId, merchantId);
+  await updateOrderPaymentStatus(prisma, txn.orderId, merchantId, { userId, deviceId });
 }
 
 export async function initiatePaynow(
@@ -149,7 +164,13 @@ export async function initiatePaynow(
   const body = paynowInitiateSchema.parse(payload);
   const rawBranchId =
     typeof payload === "object" && payload && "branchId" in payload ? (payload as { branchId?: unknown }).branchId : null;
+  const rawUserId =
+    typeof payload === "object" && payload && "userId" in payload ? (payload as { userId?: unknown }).userId : null;
+  const rawDeviceId =
+    typeof payload === "object" && payload && "deviceId" in payload ? (payload as { deviceId?: unknown }).deviceId : null;
   const branchId = typeof rawBranchId === "string" && rawBranchId.trim().length > 0 ? rawBranchId : null;
+  const userId = typeof rawUserId === "string" && rawUserId.trim().length > 0 ? rawUserId : null;
+  const deviceId = typeof rawDeviceId === "string" && rawDeviceId.trim().length > 0 ? rawDeviceId : "server-paynow";
   const order = await prisma.order.findFirst({
     where: {
       id: body.orderId,
@@ -209,6 +230,8 @@ export async function initiatePaynow(
         merchantId,
         branchId: branchId ?? order.branchId ?? null,
         orderId: order.id,
+        createdByUserId: userId,
+        updatedByUserId: userId,
         amount: body.amount,
         method: body.method,
         phone: body.phone ?? null,
@@ -218,7 +241,8 @@ export async function initiatePaynow(
         status: "CREATED",
         rawInitResponse: toJsonValue(response),
         createdAt: now,
-        updatedAt: now
+        updatedAt: now,
+        lastModifiedByDeviceId: deviceId
       }
     });
 
@@ -228,6 +252,8 @@ export async function initiatePaynow(
         merchantId,
         branchId: branchId ?? order.branchId ?? null,
         orderId: order.id,
+        createdByUserId: userId,
+        updatedByUserId: userId,
         amount: body.amount,
         method: "PAYNOW",
         reference,
@@ -237,7 +263,7 @@ export async function initiatePaynow(
         createdAt: now,
         updatedAt: now,
         version: 1,
-        lastModifiedByDeviceId: "server-paynow"
+        lastModifiedByDeviceId: deviceId
       }
     });
   });
@@ -277,12 +303,17 @@ export async function pollPaynowStatus(
     data: {
       status: normalized,
       rawLastStatus: toJsonValue(statusResponse),
-      updatedAt: new Date()
+      updatedAt: new Date(),
+      updatedByUserId: txn.updatedByUserId ?? txn.createdByUserId ?? null,
+      lastModifiedByDeviceId: txn.lastModifiedByDeviceId
     }
   });
 
   if (normalized === "PAID") {
-    await applyPaidStatus(prisma, merchantId, txn.id);
+    await applyPaidStatus(prisma, merchantId, txn.id, {
+      deviceId: txn.lastModifiedByDeviceId,
+      userId: txn.updatedByUserId ?? txn.createdByUserId ?? undefined
+    });
   }
 
   return {
@@ -335,11 +366,16 @@ export async function handlePaynowWebhook(prisma: PrismaClient, payload: Record<
     data: {
       status: normalized,
       rawLastStatus: toJsonValue(payload),
-      updatedAt: new Date()
+      updatedAt: new Date(),
+      updatedByUserId: txn.updatedByUserId ?? txn.createdByUserId ?? null,
+      lastModifiedByDeviceId: txn.lastModifiedByDeviceId
     }
   });
 
   if (normalized === "PAID") {
-    await applyPaidStatus(prisma, txn.merchantId, txn.id, "server-paynow-webhook");
+    await applyPaidStatus(prisma, txn.merchantId, txn.id, {
+      deviceId: "server-paynow-webhook",
+      userId: txn.updatedByUserId ?? txn.createdByUserId ?? undefined
+    });
   }
 }

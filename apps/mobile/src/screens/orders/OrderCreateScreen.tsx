@@ -58,7 +58,7 @@ export function OrderCreateScreen({ navigation }: Props) {
 
     try {
       const order = await createOrder(
-        { merchantId: session.merchantId, deviceId: session.deviceId },
+        { merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId },
         {
           customerId: selectedCustomerId,
           items,

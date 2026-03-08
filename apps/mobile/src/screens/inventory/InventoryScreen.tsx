@@ -43,7 +43,7 @@ export function InventoryScreen() {
     setBusy(true);
     try {
       await recordInventoryAdjustment(
-        { merchantId: session.merchantId, deviceId: session.deviceId },
+        { merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId },
         {
           productId: selectedProductId,
           quantity: Number(quantity),

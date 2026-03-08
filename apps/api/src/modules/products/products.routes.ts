@@ -104,6 +104,8 @@ productsRouter.post(
         data: {
           id: randomUUID(),
           merchantId,
+          createdByUserId: req.user!.userId,
+          updatedByUserId: req.user!.userId,
           name: body.name,
           price: body.price,
           cost: body.cost ?? null,
@@ -166,12 +168,13 @@ productsRouter.put(
 
     const updated = await prisma.product.update({
       where: { id: product.id },
-      data: {
-        ...body,
-        updatedAt: new Date(),
-        version: { increment: 1 },
-        lastModifiedByDeviceId: req.user!.deviceId
-      }
+        data: {
+          ...body,
+          updatedAt: new Date(),
+          updatedByUserId: req.user!.userId,
+          version: { increment: 1 },
+          lastModifiedByDeviceId: req.user!.deviceId
+        }
     });
 
     await recordAudit(prisma, req.user!, {
@@ -202,6 +205,7 @@ productsRouter.delete(
       data: {
         deletedAt: new Date(),
         updatedAt: new Date(),
+        updatedByUserId: req.user!.userId,
         version: { increment: 1 },
         lastModifiedByDeviceId: req.user!.deviceId
       }
@@ -244,6 +248,7 @@ productsRouter.post(
         data: {
           stockQty: nextQty,
           updatedAt: now,
+          updatedByUserId: req.user!.userId,
           version: { increment: 1 },
           lastModifiedByDeviceId: req.user!.deviceId
         }
@@ -288,6 +293,8 @@ productsRouter.post(
           merchantId,
           branchId: branchId ?? null,
           productId: product.id,
+          createdByUserId: req.user!.userId,
+          updatedByUserId: req.user!.userId,
           type: "ADJUSTMENT",
           quantity,
           reason: reason ?? "Manual adjustment",

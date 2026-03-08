@@ -50,7 +50,12 @@ export function AppProvider({ children }: PropsWithChildren) {
     syncLock.current = true;
     setSyncing(true);
     try {
-      const result = await syncNow({ token: session.token, merchantId: session.merchantId });
+      const result = await syncNow({
+        token: session.token,
+        merchantId: session.merchantId,
+        userId: session.userId,
+        deviceId: session.deviceId
+      });
       setLastSyncAt(result.serverTime);
       setSyncError(null);
       await setSyncState({ lastError: null });

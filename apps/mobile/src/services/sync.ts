@@ -11,6 +11,8 @@ import { apiRequest } from "./api";
 type SyncNowInput = {
   token: string;
   merchantId: string;
+  userId: string;
+  deviceId: string;
 };
 
 export async function syncNow(input: SyncNowInput): Promise<{ pushed: number; pulled: number; serverTime: string }> {
@@ -31,7 +33,9 @@ export async function syncNow(input: SyncNowInput): Promise<{ pushed: number; pu
           opType: op.opType,
           entityId: op.entityId,
           payload: op.payload,
-          clientUpdatedAt: op.clientUpdatedAt
+          clientUpdatedAt: op.clientUpdatedAt,
+          userId: op.userId ?? input.userId,
+          deviceId: op.deviceId ?? input.deviceId
         }))
       }
     });

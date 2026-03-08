@@ -1,49 +1,55 @@
-# Sync Spec (V1)
+# Sync Model
 
-## Protocol
+## Owner and Staff Data Model
 
-1. PUSH
-- Endpoint: `POST /sync/push`
-- Request:
-  - `{ operations: [{ opId, entityType, opType, entityId, payload, clientUpdatedAt }] }`
-- Server behavior:
-  - checks `(merchantId, opId)` idempotency
-  - applies UPSERT/DELETE scoped to merchant
-  - writes `SyncOperationLog`
-- Response:
-  - `{ acceptedOpIds, rejected, serverTime }`
+- Business data is owned by the merchant, not by a single device.
+- Every synced row remains scoped by `merchantId`.
+- Staff users and the owner share the same merchant dataset.
+- Audit fields identify who last changed a row:
+  - `createdByUserId`
+  - `updatedByUserId`
+  - `lastModifiedByDeviceId`
+- This means a cashier can create orders offline, sync later, and the owner can pull the same merchant data onto another device.
 
-2. PULL
-- Endpoint: `GET /sync/pull?since=<ISO optional>`
-- Response:
-  - `{ serverTime, changes: { products, customers, orders, orderItems, payments, stockMovements, settings, featureFlags } }`
+## Device and Outbox Flow
 
-3. APPLY (mobile)
-- Merge each incoming row into SQLite
-- Compare `updatedAt`
-- Apply only if server row is newer-or-equal than local row
+Each device keeps a local source of truth plus an outbox.
 
-4. ACK
-- Remove accepted operations from outbox
+1. User signs in on a device.
+2. The device is registered under that user.
+3. Every local mutation writes to the local database first.
+4. The same mutation is appended to the device outbox with:
+   - `opId`
+   - `entityType`
+   - `entityId`
+   - `opType`
+   - `payload`
+   - `clientUpdatedAt`
+   - `userId`
+   - `deviceId`
+5. When online, sync runs in this order:
+   - push outbox
+   - pull merchant changes since `lastPullAt`
+   - merge pulled rows into local storage
+
+## Server Push Rules
+
+- `merchantId` is derived from the auth token.
+- `userId` and `deviceId` from the token are enforced against each operation.
+- Duplicate `opId` values are ignored through `SyncOperationLog`.
+- Disabled users cannot push or pull.
+- Revoked devices cannot push or pull.
+- Soft deletes update `deletedAt`, `updatedAt`, `updatedByUserId`, and `lastModifiedByDeviceId`.
 
 ## Conflict Resolution
 
-- Strategy: Last Write Wins
-- Primary key: `updatedAt`
-- Tie-breaker: server row wins when timestamps equal
+- Conflict policy is last-write-wins by `updatedAt`.
+- If timestamps differ, the newer `updatedAt` wins.
+- If timestamps are equal, the server version wins.
+- This rule is applied consistently for owner and staff devices so merges stay deterministic.
 
-## Retry and Network Resilience
+## Owner Visibility
 
-- Sync runs when online and authenticated
-- Triggered on:
-  - foreground resume
-  - periodic timer
-  - manual sync button
-- Sync errors are persisted into `sync_state.last_error`
-- Queue survives app restarts
-
-## Idempotency
-
-- Every operation has unique `opId`
-- Server stores `SyncOperationLog` with unique `(merchantId, opId)`
-- Duplicate push operations return accepted without re-applying state
+- After a staff device pushes changes, those rows are stored under the shared merchant.
+- When the owner device pulls, it receives the same merchant-scoped rows.
+- Audit fields let the UI show who created or last updated orders and payments when that information is available locally.

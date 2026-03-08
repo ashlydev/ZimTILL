@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import { onlinePaymentsMessage } from "../lib/offlineCore";
 import { formatDateTime, formatMoney, formatOrderStatus, toStatusClass } from "../lib/format";
-import type { Order, Payment, Product } from "../types";
+import type { Order, Payment, Product, StaffUser } from "../types";
 import { getButtonClassName, Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -44,29 +44,6 @@ const itemColumns: Array<TableColumn<OrderDetails["items"][number]>> = [
   }
 ];
 
-const paymentColumns: Array<TableColumn<Payment>> = [
-  {
-    key: "paidAt",
-    header: "Paid At",
-    render: (payment) => formatDateTime(payment.paidAt)
-  },
-  {
-    key: "method",
-    header: "Method",
-    render: (payment) => payment.method
-  },
-  {
-    key: "amount",
-    header: "Amount",
-    render: (payment) => formatMoney(Number(payment.amount))
-  },
-  {
-    key: "reference",
-    header: "Reference",
-    render: (payment) => payment.reference || "-"
-  }
-];
-
 function paynowBadgeClass(status: string): string {
   if (status === "PAID") return "status-paid";
   if (status === "AWAITING") return "status-sent";
@@ -79,6 +56,7 @@ export function OrderDetailsPage() {
   const { token, isOnline } = useAuth();
 
   const [order, setOrder] = useState<OrderDetails | null>(null);
+  const [staffById, setStaffById] = useState<Record<string, StaffUser>>({});
   const [paid, setPaid] = useState(0);
   const [balance, setBalance] = useState(0);
   const [payAmount, setPayAmount] = useState("");
@@ -119,6 +97,58 @@ export function OrderDetailsPage() {
   useEffect(() => {
     void refresh();
   }, [token, id]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    let cancelled = false;
+    void api
+      .listStaff(token)
+      .then((result) => {
+        if (cancelled) return;
+        setStaffById(Object.fromEntries(result.staff.map((member) => [member.id, member])));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStaffById({});
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const paymentColumns = useMemo<Array<TableColumn<Payment>>>(
+    () => [
+      {
+        key: "paidAt",
+        header: "Paid At",
+        render: (payment) => formatDateTime(payment.paidAt)
+      },
+      {
+        key: "method",
+        header: "Method",
+        render: (payment) => payment.method
+      },
+      {
+        key: "amount",
+        header: "Amount",
+        render: (payment) => formatMoney(Number(payment.amount))
+      },
+      {
+        key: "reference",
+        header: "Reference",
+        render: (payment) => payment.reference || "-"
+      },
+      {
+        key: "createdBy",
+        header: "Created By",
+        render: (payment) => (payment.createdByUserId ? staffById[payment.createdByUserId]?.identifier ?? payment.createdByUserId : "-")
+      }
+    ],
+    [staffById]
+  );
 
   const whatsappLink = useMemo(() => {
     if (!order) return "";
@@ -294,6 +324,10 @@ export function OrderDetailsPage() {
             <p className="summary-label">Last Updated</p>
             <p>{formatDateTime(order.updatedAt)}</p>
           </div>
+          <div>
+            <p className="summary-label">Created By</p>
+            <p>{order.createdByUserId ? staffById[order.createdByUserId]?.identifier ?? order.createdByUserId : "-"}</p>
+          </div>
         </div>
       </Card>
 
@@ -417,7 +451,11 @@ export function OrderDetailsPage() {
                     { label: "Method", value: payment.method },
                     { label: "Amount", value: formatMoney(Number(payment.amount)) },
                     { label: "Reference", value: payment.reference || "-" },
-                    { label: "Paid At", value: formatDateTime(payment.paidAt) }
+                    { label: "Paid At", value: formatDateTime(payment.paidAt) },
+                    {
+                      label: "Created By",
+                      value: payment.createdByUserId ? staffById[payment.createdByUserId]?.identifier ?? payment.createdByUserId : "-"
+                    }
                   ]}
                   subtitle="Payment"
                   title={payment.method}

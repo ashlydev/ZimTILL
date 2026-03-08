@@ -4,6 +4,8 @@ export type InventoryAdjustmentReason = "RETURN" | "EXPIRED" | "DAMAGED";
 type SyncBaseEntity = {
   merchantId: string;
   branchId?: string | null;
+  createdByUserId?: string | null;
+  updatedByUserId?: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;

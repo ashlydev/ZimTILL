@@ -24,6 +24,8 @@ type OutboxOperation = {
   entityId: string;
   payload: Record<string, unknown>;
   clientUpdatedAt: string;
+  userId: string;
+  deviceId: string;
 };
 
 type SyncPullResponse = {
@@ -34,6 +36,7 @@ type SyncPullResponse = {
     orders?: Order[];
     orderItems?: OrderItem[];
     payments?: Payment[];
+    paynowTransactions?: Array<Record<string, unknown>>;
     stockMovements?: StockMovement[];
     settings?: Settings[];
   };
@@ -47,6 +50,7 @@ type SyncPushResponse = {
 
 type OfflineSessionContext = {
   merchantId: string;
+  userId: string;
   deviceId: string;
   activeBranchId: string | null;
   businessName: string;
@@ -266,12 +270,13 @@ async function deleteManyOutbox(opIds: string[]) {
 
 function requireSessionContext(): OfflineSessionContext {
   const snapshot = getAuthSnapshot();
-  if (!snapshot?.merchant?.id) {
+  if (!snapshot?.merchant?.id || !snapshot.user?.id) {
     throw new Error("Offline session is not ready");
   }
 
   return {
     merchantId: snapshot.merchant.id,
+    userId: snapshot.user.id,
     deviceId: getDeviceId(),
     activeBranchId: snapshot.activeBranchId ?? null,
     businessName: snapshot.merchant.name ?? "ZimTILL"
@@ -303,11 +308,20 @@ function shouldApplyServerRecord(localUpdatedAt: string | undefined, serverUpdat
   return new Date(serverUpdatedAt).getTime() >= new Date(localUpdatedAt).getTime();
 }
 
-async function enqueueOperation(operation: Omit<OutboxOperation, "opId" | "clientUpdatedAt"> & { clientUpdatedAt?: string }) {
+async function enqueueOperation(
+  operation: Omit<OutboxOperation, "opId" | "clientUpdatedAt" | "userId" | "deviceId"> & {
+    clientUpdatedAt?: string;
+    userId?: string;
+    deviceId?: string;
+  }
+) {
+  const context = requireSessionContext();
   const outboxOperation: OutboxOperation = {
     ...operation,
     opId: makeId("op"),
-    clientUpdatedAt: operation.clientUpdatedAt ?? nowIso()
+    clientUpdatedAt: operation.clientUpdatedAt ?? nowIso(),
+    userId: operation.userId ?? context.userId,
+    deviceId: operation.deviceId ?? context.deviceId
   };
 
   await writeOne("outbox", outboxOperation);
@@ -358,6 +372,8 @@ async function getSettingsRecord(merchantId: string) {
   const fallback: Settings = {
     id: makeId("settings"),
     merchantId,
+    createdByUserId: context.userId,
+    updatedByUserId: context.userId,
     businessName: context.businessName,
     currencyCode: "USD",
     currencySymbol: "$",
@@ -413,6 +429,7 @@ async function updateOrderTotalsFromPayments(orderId: string) {
       ...order,
       status: nextStatus,
       updatedAt: nowIso(),
+      updatedByUserId: context.userId,
       version: order.version + 1,
       lastModifiedByDeviceId: context.deviceId
     };
@@ -446,6 +463,8 @@ async function createStockMovementRecord(input: {
     id: makeId("movement"),
     merchantId: input.merchantId,
     branchId: input.branchId ?? null,
+    createdByUserId: context.userId,
+    updatedByUserId: context.userId,
     productId: input.productId,
     type: input.type,
     quantity: input.quantity,
@@ -494,6 +513,8 @@ export async function saveProductLocal(input: SaveProductInput) {
   const product: Product = {
     id: existing?.id ?? input.id ?? makeId("product"),
     merchantId: context.merchantId,
+    createdByUserId: existing?.createdByUserId ?? context.userId,
+    updatedByUserId: context.userId,
     name: input.name,
     price: Number(input.price),
     cost: input.cost ?? existing?.cost ?? null,
@@ -533,6 +554,7 @@ export async function deleteProductLocal(productId: string) {
     ...product,
     deletedAt: nowIso(),
     updatedAt: nowIso(),
+    updatedByUserId: context.userId,
     version: product.version + 1,
     lastModifiedByDeviceId: context.deviceId
   };
@@ -627,6 +649,8 @@ export async function saveCustomerLocal(input: SaveCustomerInput) {
   const customer: Customer = {
     id: existing?.id ?? input.id ?? makeId("customer"),
     merchantId: context.merchantId,
+    createdByUserId: existing?.createdByUserId ?? context.userId,
+    updatedByUserId: context.userId,
     name: input.name,
     phone: input.phone ?? existing?.phone ?? null,
     notes: input.notes ?? existing?.notes ?? null,
@@ -658,6 +682,7 @@ export async function deleteCustomerLocal(customerId: string) {
     ...customer,
     deletedAt: nowIso(),
     updatedAt: nowIso(),
+    updatedByUserId: context.userId,
     version: customer.version + 1,
     lastModifiedByDeviceId: context.deviceId
   };
@@ -713,6 +738,8 @@ export async function createOrderLocal(input: CreateOrderInput) {
       id: makeId("order-item"),
       merchantId: context.merchantId,
       orderId: "",
+      createdByUserId: context.userId,
+      updatedByUserId: context.userId,
       productId: rawItem.productId,
       quantity: Number(rawItem.quantity),
       unitPrice: Number(product.price),
@@ -737,6 +764,8 @@ export async function createOrderLocal(input: CreateOrderInput) {
     merchantId: context.merchantId,
     branchId: context.activeBranchId,
     customerId: input.customerId ?? null,
+    createdByUserId: context.userId,
+    updatedByUserId: context.userId,
     orderNumber: createOrderNumber(),
     status: "DRAFT",
     documentType: "ORDER",
@@ -835,6 +864,7 @@ export async function updateOrderStatusLocal(orderId: string, status: Order["sta
     ...order,
     status: normalizeStatus(status),
     updatedAt: nowIso(),
+    updatedByUserId: context.userId,
     version: order.version + 1,
     lastModifiedByDeviceId: context.deviceId
   };
@@ -861,6 +891,7 @@ export async function confirmOrderLocal(orderId: string) {
     status: "CONFIRMED",
     confirmedAt,
     updatedAt: confirmedAt,
+    updatedByUserId: context.userId,
     version: details.order.version + 1,
     lastModifiedByDeviceId: context.deviceId
   };
@@ -914,6 +945,7 @@ export async function cancelOrderLocal(orderId: string) {
     ...details.order,
     status: "CANCELLED",
     updatedAt: now,
+    updatedByUserId: context.userId,
     version: details.order.version + 1,
     lastModifiedByDeviceId: context.deviceId
   };
@@ -971,6 +1003,8 @@ export async function addPaymentLocal(input: AddPaymentInput) {
     merchantId: context.merchantId,
     branchId: order.branchId ?? context.activeBranchId,
     orderId: input.orderId,
+    createdByUserId: context.userId,
+    updatedByUserId: context.userId,
     amount: Number(input.amount),
     method: input.method,
     reference: input.reference ?? null,
@@ -1200,6 +1234,7 @@ async function pushOutbox(token: string, merchantId: string) {
   if (operations.length === 0) {
     return { accepted: 0, rejected: [] as Array<{ opId: string; reason: string }>, serverTime: nowIso() };
   }
+  const context = requireSessionContext();
 
   const response = await fetch(`${resolveApiBaseUrl()}/sync/push`, {
     method: "POST",
@@ -1208,7 +1243,11 @@ async function pushOutbox(token: string, merchantId: string) {
       Authorization: `Bearer ${token}`
     },
     body: JSON.stringify({
-      operations: operations.map(({ merchantId: _merchantId, ...operation }) => operation)
+      operations: operations.map(({ merchantId: _merchantId, ...operation }) => ({
+        ...operation,
+        userId: operation.userId ?? context.userId,
+        deviceId: operation.deviceId ?? context.deviceId
+      }))
     })
   });
 

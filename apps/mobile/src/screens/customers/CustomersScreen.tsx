@@ -52,7 +52,7 @@ export function CustomersScreen() {
     }
 
     await saveCustomer(
-      { merchantId: session.merchantId, deviceId: session.deviceId },
+      { merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId },
       {
         id: editing ? String(editing.id) : undefined,
         name: name.trim(),
@@ -73,7 +73,7 @@ export function CustomersScreen() {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
-          await deleteCustomer({ merchantId: session.merchantId, deviceId: session.deviceId }, String(item.id));
+          await deleteCustomer({ merchantId: session.merchantId, userId: session.userId, deviceId: session.deviceId }, String(item.id));
           await load();
         }
       }

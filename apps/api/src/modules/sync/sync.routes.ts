@@ -14,7 +14,15 @@ syncRouter.post(
   "/push",
   validateBody(syncPushSchema),
   asyncHandler(async (req, res) => {
-    const result = await handleSyncPush(prisma, req.user!.merchantId, req.body);
+    const result = await handleSyncPush(
+      prisma,
+      {
+        merchantId: req.user!.merchantId,
+        userId: req.user!.userId,
+        deviceId: req.user!.deviceId
+      },
+      req.body
+    );
     res.json(result);
   })
 );
@@ -24,7 +32,11 @@ syncRouter.get(
   validateQuery(syncPullQuerySchema),
   asyncHandler(async (req, res) => {
     const query = req.query as z.infer<typeof syncPullQuerySchema>;
-    const result = await handleSyncPull(prisma, req.user!.merchantId, query.since);
+    const result = await handleSyncPull(prisma, {
+      merchantId: req.user!.merchantId,
+      userId: req.user!.userId,
+      deviceId: req.user!.deviceId
+    }, query.since);
     res.json(result);
   })
 );

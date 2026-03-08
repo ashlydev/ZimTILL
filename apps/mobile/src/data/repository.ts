@@ -51,6 +51,7 @@ type RecordInventoryAdjustmentInput = {
 
 type SessionContext = {
   merchantId: string;
+  userId: string;
   deviceId: string;
 };
 
@@ -60,6 +61,8 @@ type OutboxRow = {
   op_type: string;
   entity_id: string;
   payload: string;
+  user_id: string | null;
+  device_id: string | null;
   created_at: string;
 };
 
@@ -103,6 +106,7 @@ function parseAdjustmentReason(reason: string | null | undefined): InventoryAdju
 }
 
 async function enqueue(
+  context: SessionContext,
   entityType: string,
   entityId: string,
   opType: "UPSERT" | "DELETE",
@@ -110,8 +114,8 @@ async function enqueue(
 ): Promise<void> {
   const db = await getDb();
   await db.runAsync(
-    "INSERT INTO outbox (id, op_id, entity_type, entity_id, op_type, payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);",
-    [generateId(), generateId(), entityType, entityId, opType, JSON.stringify(payload), nowIso()]
+    "INSERT INTO outbox (id, op_id, entity_type, entity_id, op_type, payload, user_id, device_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
+    [generateId(), generateId(), entityType, entityId, opType, JSON.stringify(payload), context.userId, context.deviceId, nowIso()]
   );
 }
 
@@ -184,11 +188,13 @@ export async function listOutbox(limit = 200): Promise<
     entityId: string;
     payload: Record<string, unknown>;
     clientUpdatedAt: string;
+    userId: string | null;
+    deviceId: string | null;
   }>
 > {
   const db = await getDb();
   const rows = await db.getAllAsync<OutboxRow>(
-    "SELECT op_id, entity_type, op_type, entity_id, payload, created_at FROM outbox ORDER BY created_at ASC LIMIT ?;",
+    "SELECT op_id, entity_type, op_type, entity_id, payload, user_id, device_id, created_at FROM outbox ORDER BY created_at ASC LIMIT ?;",
     [limit]
   );
 
@@ -198,7 +204,9 @@ export async function listOutbox(limit = 200): Promise<
     opType: row.op_type as "UPSERT" | "DELETE",
     entityId: row.entity_id,
     payload: JSON.parse(row.payload),
-    clientUpdatedAt: row.created_at
+    clientUpdatedAt: row.created_at,
+    userId: row.user_id,
+    deviceId: row.device_id
   }));
 }
 
@@ -247,10 +255,11 @@ export async function saveProduct(context: SessionContext, input: SaveProductInp
 
   await db.runAsync(
     `INSERT INTO products (
-      id, merchant_id, name, price, cost, sku, stock_qty, low_stock_threshold,
+      id, merchant_id, created_by_user_id, updated_by_user_id, name, price, cost, sku, stock_qty, low_stock_threshold,
       created_at, updated_at, deleted_at, version, last_modified_by_device_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
+      updated_by_user_id = excluded.updated_by_user_id,
       name = excluded.name,
       price = excluded.price,
       cost = excluded.cost,
@@ -264,6 +273,8 @@ export async function saveProduct(context: SessionContext, input: SaveProductInp
     [
       id,
       context.merchantId,
+      context.userId,
+      context.userId,
       input.name,
       input.price,
       input.cost ?? null,
@@ -278,7 +289,7 @@ export async function saveProduct(context: SessionContext, input: SaveProductInp
   );
 
   const product = (await getProductById(context.merchantId, id))!;
-  await enqueue("product", id, "UPSERT", product);
+  await enqueue(context, "product", id, "UPSERT", product);
   return product;
 }
 
@@ -287,14 +298,14 @@ export async function deleteProduct(context: SessionContext, productId: string):
   const now = nowIso();
   await db.runAsync(
     `UPDATE products
-     SET deleted_at = ?, updated_at = ?, version = version + 1, last_modified_by_device_id = ?
+     SET deleted_at = ?, updated_at = ?, updated_by_user_id = ?, version = version + 1, last_modified_by_device_id = ?
      WHERE merchant_id = ? AND id = ?;`,
-    [now, now, context.deviceId, context.merchantId, productId]
+    [now, now, context.userId, context.deviceId, context.merchantId, productId]
   );
 
   const product = await getProductById(context.merchantId, productId);
   if (product) {
-    await enqueue("product", productId, "DELETE", product);
+    await enqueue(context, "product", productId, "DELETE", product);
   }
 }
 
@@ -327,10 +338,10 @@ export async function adjustStock(
 
   await db.runAsync(
     `INSERT INTO stock_movements (
-      id, merchant_id, product_id, type, quantity, reason, order_id,
+      id, merchant_id, product_id, created_by_user_id, updated_by_user_id, type, quantity, reason, order_id,
       created_at, updated_at, deleted_at, version, last_modified_by_device_id
-    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 1, ?);`,
-    [movementId, context.merchantId, productId, type, quantity, reason ?? "Manual adjustment", now, now, context.deviceId]
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 1, ?);`,
+    [movementId, context.merchantId, productId, context.userId, context.userId, type, quantity, reason ?? "Manual adjustment", now, now, context.deviceId]
   );
 
   const movement = await db.getFirstAsync<Record<string, unknown>>(
@@ -339,10 +350,10 @@ export async function adjustStock(
   );
 
   if (movement) {
-    await enqueue("stockMovement", movementId, "UPSERT", toCamel(movement));
+    await enqueue(context, "stockMovement", movementId, "UPSERT", toCamel(movement));
   }
 
-  await enqueue("product", productId, "UPSERT", updated);
+  await enqueue(context, "product", productId, "UPSERT", updated);
 }
 
 export async function recordInventoryAdjustment(
@@ -374,13 +385,15 @@ export async function recordInventoryAdjustment(
 
   await db.runAsync(
     `INSERT INTO stock_movements (
-      id, merchant_id, product_id, type, quantity, reason, order_id,
+      id, merchant_id, product_id, created_by_user_id, updated_by_user_id, type, quantity, reason, order_id,
       created_at, updated_at, deleted_at, version, last_modified_by_device_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?);`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?);`,
     [
       movementId,
       context.merchantId,
       input.productId,
+      context.userId,
+      context.userId,
       nextType,
       signedQuantity,
       formatAdjustmentReason(input.reason, input.notes),
@@ -400,8 +413,8 @@ export async function recordInventoryAdjustment(
     throw new Error("Failed to record inventory adjustment");
   }
 
-  await enqueue("stockMovement", movementId, "UPSERT", toCamel(movement));
-  await enqueue("product", input.productId, "UPSERT", updated);
+  await enqueue(context, "stockMovement", movementId, "UPSERT", toCamel(movement));
+  await enqueue(context, "product", input.productId, "UPSERT", updated);
   return toCamel(movement);
 }
 
@@ -440,9 +453,10 @@ export async function saveCustomer(context: SessionContext, input: SaveCustomerI
 
   await db.runAsync(
     `INSERT INTO customers (
-      id, merchant_id, name, phone, notes, created_at, updated_at, deleted_at, version, last_modified_by_device_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+      id, merchant_id, created_by_user_id, updated_by_user_id, name, phone, notes, created_at, updated_at, deleted_at, version, last_modified_by_device_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
+      updated_by_user_id = excluded.updated_by_user_id,
       name = excluded.name,
       phone = excluded.phone,
       notes = excluded.notes,
@@ -450,11 +464,11 @@ export async function saveCustomer(context: SessionContext, input: SaveCustomerI
       deleted_at = NULL,
       version = excluded.version,
       last_modified_by_device_id = excluded.last_modified_by_device_id;`,
-    [id, context.merchantId, input.name, input.phone ?? null, input.notes ?? null, now, now, version, context.deviceId]
+    [id, context.merchantId, context.userId, context.userId, input.name, input.phone ?? null, input.notes ?? null, now, now, version, context.deviceId]
   );
 
   const customer = (await getCustomerById(context.merchantId, id))!;
-  await enqueue("customer", id, "UPSERT", customer);
+  await enqueue(context, "customer", id, "UPSERT", customer);
   return customer;
 }
 
@@ -462,13 +476,13 @@ export async function deleteCustomer(context: SessionContext, customerId: string
   const db = await getDb();
   const now = nowIso();
   await db.runAsync(
-    "UPDATE customers SET deleted_at = ?, updated_at = ?, version = version + 1, last_modified_by_device_id = ? WHERE merchant_id = ? AND id = ?;",
-    [now, now, context.deviceId, context.merchantId, customerId]
+    "UPDATE customers SET deleted_at = ?, updated_at = ?, updated_by_user_id = ?, version = version + 1, last_modified_by_device_id = ? WHERE merchant_id = ? AND id = ?;",
+    [now, now, context.userId, context.deviceId, context.merchantId, customerId]
   );
 
   const customer = await getCustomerById(context.merchantId, customerId);
   if (customer) {
-    await enqueue("customer", customerId, "DELETE", customer);
+    await enqueue(context, "customer", customerId, "DELETE", customer);
   }
 }
 
@@ -531,13 +545,15 @@ export async function createOrder(context: SessionContext, input: CreateOrderInp
 
   await db.runAsync(
     `INSERT INTO orders (
-      id, merchant_id, customer_id, order_number, status, subtotal, discount_amount, discount_percent,
+      id, merchant_id, customer_id, created_by_user_id, updated_by_user_id, order_number, status, subtotal, discount_amount, discount_percent,
       total, notes, confirmed_at, created_at, updated_at, deleted_at, version, last_modified_by_device_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 1, ?);`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 1, ?);`,
     [
       orderId,
       context.merchantId,
       input.customerId ?? null,
+      context.userId,
+      context.userId,
       orderNumber,
       "DRAFT",
       subtotal,
@@ -563,15 +579,15 @@ export async function createOrder(context: SessionContext, input: CreateOrderInp
 
     await db.runAsync(
       `INSERT INTO order_items (
-        id, merchant_id, order_id, product_id, quantity, unit_price, line_total,
+        id, merchant_id, order_id, product_id, created_by_user_id, updated_by_user_id, quantity, unit_price, line_total,
         created_at, updated_at, deleted_at, version, last_modified_by_device_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?);`,
-      [generateId(), context.merchantId, orderId, item.productId, item.quantity, Number(product.price), lineTotal, now, now, context.deviceId]
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?);`,
+      [generateId(), context.merchantId, orderId, item.productId, context.userId, context.userId, item.quantity, Number(product.price), lineTotal, now, now, context.deviceId]
     );
   }
 
   const order = (await getOrderById(context.merchantId, orderId))!;
-  await enqueue("order", orderId, "UPSERT", order);
+  await enqueue(context, "order", orderId, "UPSERT", order);
 
   const items = await db.getAllAsync<Record<string, unknown>>(
     "SELECT * FROM order_items WHERE merchant_id = ? AND order_id = ? AND deleted_at IS NULL;",
@@ -579,7 +595,7 @@ export async function createOrder(context: SessionContext, input: CreateOrderInp
   );
 
   for (const item of items) {
-    await enqueue("orderItem", String(item.id), "UPSERT", toCamel(item));
+    await enqueue(context, "orderItem", String(item.id), "UPSERT", toCamel(item));
   }
 
   return order;
@@ -641,7 +657,7 @@ export async function getOrderDetails(
 async function enqueueOrderById(context: SessionContext, orderId: string) {
   const order = await getOrderById(context.merchantId, orderId);
   if (order) {
-    await enqueue("order", orderId, "UPSERT", order);
+    await enqueue(context, "order", orderId, "UPSERT", order);
   }
 }
 
@@ -659,13 +675,15 @@ async function createStockMovement(
 
   await db.runAsync(
     `INSERT INTO stock_movements (
-      id, merchant_id, product_id, type, quantity, reason, order_id,
+      id, merchant_id, product_id, created_by_user_id, updated_by_user_id, type, quantity, reason, order_id,
       created_at, updated_at, deleted_at, version, last_modified_by_device_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?);`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?);`,
     [
       movementId,
       context.merchantId,
       productId,
+      context.userId,
+      context.userId,
       type,
       quantity,
       reason,
@@ -681,7 +699,7 @@ async function createStockMovement(
     [movementId]
   );
   if (movement) {
-    await enqueue("stockMovement", movementId, "UPSERT", toCamel(movement));
+    await enqueue(context, "stockMovement", movementId, "UPSERT", toCamel(movement));
   }
 }
 
@@ -690,9 +708,9 @@ export async function updateOrderStatus(context: SessionContext, orderId: string
   const now = nowIso();
   await db.runAsync(
     `UPDATE orders
-     SET status = ?, updated_at = ?, version = version + 1, last_modified_by_device_id = ?
+     SET status = ?, updated_at = ?, updated_by_user_id = ?, version = version + 1, last_modified_by_device_id = ?
      WHERE merchant_id = ? AND id = ?;`,
-    [normalizeOrderStatus(status), now, context.deviceId, context.merchantId, orderId]
+    [normalizeOrderStatus(status), now, context.userId, context.deviceId, context.merchantId, orderId]
   );
   await enqueueOrderById(context, orderId);
 }
@@ -706,9 +724,9 @@ export async function confirmOrder(context: SessionContext, orderId: string): Pr
   const now = nowIso();
   await db.runAsync(
     `UPDATE orders
-     SET status = 'CONFIRMED', confirmed_at = ?, updated_at = ?, version = version + 1, last_modified_by_device_id = ?
+     SET status = 'CONFIRMED', confirmed_at = ?, updated_at = ?, updated_by_user_id = ?, version = version + 1, last_modified_by_device_id = ?
      WHERE merchant_id = ? AND id = ?;`,
-    [now, now, context.deviceId, context.merchantId, orderId]
+    [now, now, context.userId, context.deviceId, context.merchantId, orderId]
   );
 
   const items = await db.getAllAsync<Record<string, unknown>>(
@@ -755,9 +773,9 @@ export async function cancelOrder(context: SessionContext, orderId: string): Pro
 
   await db.runAsync(
     `UPDATE orders
-     SET status = 'CANCELLED', updated_at = ?, version = version + 1, last_modified_by_device_id = ?
+     SET status = 'CANCELLED', updated_at = ?, updated_by_user_id = ?, version = version + 1, last_modified_by_device_id = ?
      WHERE merchant_id = ? AND id = ?;`,
-    [now, context.deviceId, context.merchantId, orderId]
+    [now, context.userId, context.deviceId, context.merchantId, orderId]
   );
 
   if (wasConfirmed) {
@@ -828,13 +846,15 @@ export async function addPayment(context: SessionContext, input: AddPaymentInput
 
   await db.runAsync(
     `INSERT INTO payments (
-      id, merchant_id, order_id, amount, method, reference, paid_at,
+      id, merchant_id, order_id, created_by_user_id, updated_by_user_id, amount, method, reference, paid_at,
       status, paynow_transaction_id, created_at, updated_at, deleted_at, version, last_modified_by_device_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?);`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?);`,
     [
       id,
       context.merchantId,
       input.orderId,
+      context.userId,
+      context.userId,
       input.amount,
       input.method,
       input.reference ?? null,
@@ -857,7 +877,7 @@ export async function addPayment(context: SessionContext, input: AddPaymentInput
   }
 
   const payment = toCamel(paymentRow);
-  await enqueue("payment", id, "UPSERT", payment);
+  await enqueue(context, "payment", id, "UPSERT", payment);
 
   await updateOrderPaymentStatus(context, input.orderId);
 
@@ -1037,6 +1057,7 @@ export async function getReports(merchantId: string): Promise<{
 
 export async function getSettings(merchantId: string): Promise<Record<string, unknown>> {
   const db = await getDb();
+  const deviceId = await getDeviceId();
   const existing = await db.getFirstAsync<Record<string, unknown>>(
     "SELECT * FROM settings WHERE merchant_id = ? AND deleted_at IS NULL;",
     [merchantId]
@@ -1050,6 +1071,8 @@ export async function getSettings(merchantId: string): Promise<Record<string, un
   const setting = {
     id: generateId(),
     merchant_id: merchantId,
+    created_by_user_id: null,
+    updated_by_user_id: null,
     business_name: "My Business",
     currency_code: "USD",
     currency_symbol: "$",
@@ -1062,18 +1085,20 @@ export async function getSettings(merchantId: string): Promise<Record<string, un
     updated_at: now,
     deleted_at: null,
     version: 1,
-    last_modified_by_device_id: "local-default"
+    last_modified_by_device_id: deviceId
   };
 
   await db.runAsync(
     `INSERT INTO settings (
-      id, merchant_id, business_name, currency_code, currency_symbol, payment_instructions,
+      id, merchant_id, created_by_user_id, updated_by_user_id, business_name, currency_code, currency_symbol, payment_instructions,
       whatsapp_template, support_phone, support_email, created_at, updated_at, deleted_at,
       version, last_modified_by_device_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?);`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?);`,
     [
       setting.id,
       setting.merchant_id,
+      setting.created_by_user_id,
+      setting.updated_by_user_id,
       setting.business_name,
       setting.currency_code,
       setting.currency_symbol,
@@ -1110,6 +1135,8 @@ export async function saveSettings(
     ...input,
     id: String(current.id),
     merchantId: context.merchantId,
+    createdByUserId: current.createdByUserId ?? context.userId,
+    updatedByUserId: context.userId,
     updatedAt: nowIso(),
     version: Number(current.version) + 1,
     lastModifiedByDeviceId: context.deviceId
@@ -1124,6 +1151,7 @@ export async function saveSettings(
       whatsapp_template = ?,
       support_phone = ?,
       support_email = ?,
+      updated_by_user_id = ?,
       updated_at = ?,
       version = ?,
       last_modified_by_device_id = ?
@@ -1136,6 +1164,7 @@ export async function saveSettings(
       String(next.whatsappTemplate ?? ""),
       next.supportPhone ?? null,
       next.supportEmail ?? null,
+      next.updatedByUserId ?? null,
       String(next.updatedAt),
       next.version,
       String(next.lastModifiedByDeviceId),
@@ -1144,7 +1173,7 @@ export async function saveSettings(
   );
 
   const updated = await getSettings(context.merchantId);
-  await enqueue("settings", String(updated.id), "UPSERT", updated);
+  await enqueue(context, "settings", String(updated.id), "UPSERT", updated);
   return updated;
 }
 
@@ -1180,7 +1209,7 @@ export async function setFeatureFlag(context: SessionContext, key: string, enabl
     [id, key, enabled ? 1 : 0, context.merchantId, now, now]
   );
 
-  await enqueue("featureFlag", id, "UPSERT", {
+  await enqueue(context, "featureFlag", id, "UPSERT", {
     id,
     key,
     enabled,
@@ -1263,6 +1292,8 @@ export async function applySyncChanges(
       [
         "id",
         "merchant_id",
+        "created_by_user_id",
+        "updated_by_user_id",
         "name",
         "price",
         "cost",
@@ -1278,6 +1309,8 @@ export async function applySyncChanges(
       [
         row.id,
         row.merchantId,
+        row.createdByUserId ?? null,
+        row.updatedByUserId ?? null,
         row.name,
         row.price,
         row.cost,
@@ -1301,6 +1334,8 @@ export async function applySyncChanges(
       [
         "id",
         "merchant_id",
+        "created_by_user_id",
+        "updated_by_user_id",
         "name",
         "phone",
         "notes",
@@ -1313,6 +1348,8 @@ export async function applySyncChanges(
       [
         row.id,
         row.merchantId,
+        row.createdByUserId ?? null,
+        row.updatedByUserId ?? null,
         row.name,
         row.phone,
         row.notes,
@@ -1334,6 +1371,8 @@ export async function applySyncChanges(
         "id",
         "merchant_id",
         "customer_id",
+        "created_by_user_id",
+        "updated_by_user_id",
         "order_number",
         "status",
         "subtotal",
@@ -1352,6 +1391,8 @@ export async function applySyncChanges(
         row.id,
         row.merchantId,
         row.customerId,
+        row.createdByUserId ?? null,
+        row.updatedByUserId ?? null,
         row.orderNumber,
         row.status,
         row.subtotal,
@@ -1379,6 +1420,8 @@ export async function applySyncChanges(
         "merchant_id",
         "order_id",
         "product_id",
+        "created_by_user_id",
+        "updated_by_user_id",
         "quantity",
         "unit_price",
         "line_total",
@@ -1393,6 +1436,8 @@ export async function applySyncChanges(
         row.merchantId,
         row.orderId,
         row.productId,
+        row.createdByUserId ?? null,
+        row.updatedByUserId ?? null,
         row.quantity,
         row.unitPrice,
         row.lineTotal,
@@ -1414,6 +1459,8 @@ export async function applySyncChanges(
         "id",
         "merchant_id",
         "order_id",
+        "created_by_user_id",
+        "updated_by_user_id",
         "amount",
         "method",
         "reference",
@@ -1430,6 +1477,8 @@ export async function applySyncChanges(
         row.id,
         row.merchantId,
         row.orderId,
+        row.createdByUserId ?? null,
+        row.updatedByUserId ?? null,
         row.amount,
         row.method,
         row.reference,
@@ -1454,6 +1503,8 @@ export async function applySyncChanges(
         "id",
         "merchant_id",
         "product_id",
+        "created_by_user_id",
+        "updated_by_user_id",
         "type",
         "quantity",
         "reason",
@@ -1468,6 +1519,8 @@ export async function applySyncChanges(
         row.id,
         row.merchantId,
         row.productId,
+        row.createdByUserId ?? null,
+        row.updatedByUserId ?? null,
         row.type,
         row.quantity,
         row.reason,
@@ -1489,6 +1542,8 @@ export async function applySyncChanges(
       [
         "id",
         "merchant_id",
+        "created_by_user_id",
+        "updated_by_user_id",
         "business_name",
         "currency_code",
         "currency_symbol",
@@ -1505,6 +1560,8 @@ export async function applySyncChanges(
       [
         row.id,
         row.merchantId,
+        row.createdByUserId ?? null,
+        row.updatedByUserId ?? null,
         row.businessName,
         row.currencyCode,
         row.currencySymbol,
@@ -1608,16 +1665,23 @@ export async function importLocalBackup(context: SessionContext, backup: Record<
   const data = (backup.data ?? backup) as Record<string, unknown>;
 
   const changes: SyncPullResponse["changes"] = {
+    branches: [],
     products: forceMerchant(Array.isArray(data.products) ? (data.products as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["products"],
+    productStocks: [],
     customers: forceMerchant(Array.isArray(data.customers) ? (data.customers as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["customers"],
     orders: forceMerchant(Array.isArray(data.orders) ? (data.orders as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["orders"],
     orderItems: forceMerchant(Array.isArray(data.orderItems) ? (data.orderItems as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["orderItems"],
     payments: forceMerchant(Array.isArray(data.payments) ? (data.payments as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["payments"],
+    paynowTransactions: [],
     stockMovements: forceMerchant(
       Array.isArray(data.stockMovements) ? (data.stockMovements as Record<string, unknown>[]) : [],
       context.merchantId
     ) as SyncPullResponse["changes"]["stockMovements"],
+    transfers: [],
+    transferItems: [],
+    deliveries: [],
     settings: forceMerchant(Array.isArray(data.settings) ? (data.settings as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["settings"],
+    catalogSettings: [],
     featureFlags: Array.isArray(data.featureFlags) ? (data.featureFlags as SyncPullResponse["changes"]["featureFlags"]) : []
   };
 

@@ -4,6 +4,7 @@ import {
   orderItemSchema,
   orderSchema,
   paymentSchema,
+  paynowTransactionSchema,
   productSchema,
   settingsSchema,
   stockMovementSchema,
@@ -20,13 +21,29 @@ type PushResult = {
   serverTime: string;
 };
 
+type SyncActorContext = {
+  merchantId: string;
+  userId: string;
+  deviceId: string;
+};
+
 function dateValue(value: string | null | undefined): Date | null {
   if (!value) return null;
   return new Date(value);
 }
 
-function isNewer(clientUpdatedAt: string, serverUpdatedAt: Date): boolean {
-  return new Date(clientUpdatedAt).getTime() >= serverUpdatedAt.getTime();
+function jsonValue(value: unknown): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return Prisma.JsonNull;
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+function clientUpdatedAt(operation: SyncOperation): Date {
+  return new Date(operation.clientUpdatedAt);
+}
+
+function isClientNewer(operation: SyncOperation, serverUpdatedAt: Date): boolean {
+  return clientUpdatedAt(operation).getTime() > serverUpdatedAt.getTime();
 }
 
 function ensureMerchantScope(payloadMerchantId: string, merchantId: string): void {
@@ -35,52 +52,88 @@ function ensureMerchantScope(payloadMerchantId: string, merchantId: string): voi
   }
 }
 
+function ensureOperationActor(operation: SyncOperation, actor: SyncActorContext): void {
+  if (operation.userId !== actor.userId || operation.deviceId !== actor.deviceId) {
+    throw new HttpError(403, "Sync actor mismatch");
+  }
+}
+
+async function assertSyncActorAllowed(prisma: PrismaClient, actor: SyncActorContext): Promise<void> {
+  const [user, device] = await Promise.all([
+    prisma.user.findFirst({
+      where: {
+        id: actor.userId,
+        merchantId: actor.merchantId,
+        deletedAt: null,
+        isActive: true
+      }
+    }),
+    prisma.device.findFirst({
+      where: {
+        merchantId: actor.merchantId,
+        userId: actor.userId,
+        deviceId: actor.deviceId,
+        deletedAt: null,
+        revokedAt: null
+      }
+    })
+  ]);
+
+  if (!user) {
+    throw new HttpError(401, "User is disabled or missing");
+  }
+
+  if (!device) {
+    throw new HttpError(401, "Device is revoked or missing");
+  }
+}
+
+function baseAuditData(existingCreatedByUserId: string | null | undefined, actor: SyncActorContext, operation: SyncOperation) {
+  return {
+    createdByUserId: existingCreatedByUserId ?? actor.userId,
+    updatedByUserId: actor.userId,
+    updatedAt: clientUpdatedAt(operation),
+    lastModifiedByDeviceId: actor.deviceId
+  };
+}
+
 async function upsertEntity(
   tx: Prisma.TransactionClient,
-  merchantId: string,
+  actor: SyncActorContext,
   operation: SyncOperation
 ): Promise<void> {
   switch (operation.entityType) {
     case "product": {
       const payload = productSchema.parse(operation.payload);
-      ensureMerchantScope(payload.merchantId, merchantId);
+      ensureMerchantScope(payload.merchantId, actor.merchantId);
 
-      const existing = await tx.product.findFirst({ where: { id: payload.id, merchantId } });
-      if (existing && !isNewer(payload.updatedAt, existing.updatedAt)) return;
+      const existing = await tx.product.findFirst({ where: { id: payload.id, merchantId: actor.merchantId } });
+      if (existing && !isClientNewer(operation, existing.updatedAt)) return;
+
+      const data = {
+        name: payload.name,
+        price: payload.price,
+        cost: payload.cost,
+        sku: payload.sku,
+        category: payload.category,
+        stockQty: payload.stockQty,
+        lowStockThreshold: payload.lowStockThreshold,
+        isPublished: payload.isPublished,
+        isActive: payload.isActive,
+        createdAt: new Date(payload.createdAt),
+        deletedAt: dateValue(payload.deletedAt),
+        version: payload.version,
+        ...baseAuditData(existing?.createdByUserId, actor, operation)
+      };
 
       if (existing) {
-        await tx.product.update({
-          where: { id: payload.id },
-          data: {
-            name: payload.name,
-            price: payload.price,
-            cost: payload.cost,
-            sku: payload.sku,
-            stockQty: payload.stockQty,
-            lowStockThreshold: payload.lowStockThreshold,
-            createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt),
-            deletedAt: dateValue(payload.deletedAt),
-            version: payload.version,
-            lastModifiedByDeviceId: payload.lastModifiedByDeviceId
-          }
-        });
+        await tx.product.update({ where: { id: payload.id }, data });
       } else {
         await tx.product.create({
           data: {
             id: payload.id,
-            merchantId: payload.merchantId,
-            name: payload.name,
-            price: payload.price,
-            cost: payload.cost,
-            sku: payload.sku,
-            stockQty: payload.stockQty,
-            lowStockThreshold: payload.lowStockThreshold,
-            createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt),
-            deletedAt: dateValue(payload.deletedAt),
-            version: payload.version,
-            lastModifiedByDeviceId: payload.lastModifiedByDeviceId
+            merchantId: actor.merchantId,
+            ...data
           }
         });
       }
@@ -90,38 +143,29 @@ async function upsertEntity(
 
     case "customer": {
       const payload = customerSchema.parse(operation.payload);
-      ensureMerchantScope(payload.merchantId, merchantId);
+      ensureMerchantScope(payload.merchantId, actor.merchantId);
 
-      const existing = await tx.customer.findFirst({ where: { id: payload.id, merchantId } });
-      if (existing && !isNewer(payload.updatedAt, existing.updatedAt)) return;
+      const existing = await tx.customer.findFirst({ where: { id: payload.id, merchantId: actor.merchantId } });
+      if (existing && !isClientNewer(operation, existing.updatedAt)) return;
+
+      const data = {
+        name: payload.name,
+        phone: payload.phone,
+        notes: payload.notes,
+        createdAt: new Date(payload.createdAt),
+        deletedAt: dateValue(payload.deletedAt),
+        version: payload.version,
+        ...baseAuditData(existing?.createdByUserId, actor, operation)
+      };
 
       if (existing) {
-        await tx.customer.update({
-          where: { id: payload.id },
-          data: {
-            name: payload.name,
-            phone: payload.phone,
-            notes: payload.notes,
-            createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt),
-            deletedAt: dateValue(payload.deletedAt),
-            version: payload.version,
-            lastModifiedByDeviceId: payload.lastModifiedByDeviceId
-          }
-        });
+        await tx.customer.update({ where: { id: payload.id }, data });
       } else {
         await tx.customer.create({
           data: {
             id: payload.id,
-            merchantId: payload.merchantId,
-            name: payload.name,
-            phone: payload.phone,
-            notes: payload.notes,
-            createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt),
-            deletedAt: dateValue(payload.deletedAt),
-            version: payload.version,
-            lastModifiedByDeviceId: payload.lastModifiedByDeviceId
+            merchantId: actor.merchantId,
+            ...data
           }
         });
       }
@@ -131,50 +175,40 @@ async function upsertEntity(
 
     case "order": {
       const payload = orderSchema.parse(operation.payload);
-      ensureMerchantScope(payload.merchantId, merchantId);
+      ensureMerchantScope(payload.merchantId, actor.merchantId);
 
-      const existing = await tx.order.findFirst({ where: { id: payload.id, merchantId } });
-      if (existing && !isNewer(payload.updatedAt, existing.updatedAt)) return;
+      const existing = await tx.order.findFirst({ where: { id: payload.id, merchantId: actor.merchantId } });
+      if (existing && !isClientNewer(operation, existing.updatedAt)) return;
+
+      const data = {
+        branchId: payload.branchId ?? null,
+        customerId: payload.customerId,
+        orderNumber: payload.orderNumber,
+        status: payload.status,
+        documentType: payload.documentType,
+        source: payload.source,
+        subtotal: payload.subtotal,
+        discountAmount: payload.discountAmount,
+        discountPercent: payload.discountPercent,
+        total: payload.total,
+        notes: payload.notes,
+        customerName: payload.customerName ?? null,
+        customerPhone: payload.customerPhone ?? null,
+        confirmedAt: dateValue(payload.confirmedAt),
+        createdAt: new Date(payload.createdAt),
+        deletedAt: dateValue(payload.deletedAt),
+        version: payload.version,
+        ...baseAuditData(existing?.createdByUserId, actor, operation)
+      };
 
       if (existing) {
-        await tx.order.update({
-          where: { id: payload.id },
-          data: {
-            customerId: payload.customerId,
-            orderNumber: payload.orderNumber,
-            status: payload.status,
-            subtotal: payload.subtotal,
-            discountAmount: payload.discountAmount,
-            discountPercent: payload.discountPercent,
-            total: payload.total,
-            notes: payload.notes,
-            confirmedAt: dateValue(payload.confirmedAt),
-            createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt),
-            deletedAt: dateValue(payload.deletedAt),
-            version: payload.version,
-            lastModifiedByDeviceId: payload.lastModifiedByDeviceId
-          }
-        });
+        await tx.order.update({ where: { id: payload.id }, data });
       } else {
         await tx.order.create({
           data: {
             id: payload.id,
-            merchantId: payload.merchantId,
-            customerId: payload.customerId,
-            orderNumber: payload.orderNumber,
-            status: payload.status,
-            subtotal: payload.subtotal,
-            discountAmount: payload.discountAmount,
-            discountPercent: payload.discountPercent,
-            total: payload.total,
-            notes: payload.notes,
-            confirmedAt: dateValue(payload.confirmedAt),
-            createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt),
-            deletedAt: dateValue(payload.deletedAt),
-            version: payload.version,
-            lastModifiedByDeviceId: payload.lastModifiedByDeviceId
+            merchantId: actor.merchantId,
+            ...data
           }
         });
       }
@@ -184,42 +218,31 @@ async function upsertEntity(
 
     case "orderItem": {
       const payload = orderItemSchema.parse(operation.payload);
-      ensureMerchantScope(payload.merchantId, merchantId);
+      ensureMerchantScope(payload.merchantId, actor.merchantId);
 
-      const existing = await tx.orderItem.findFirst({ where: { id: payload.id, merchantId } });
-      if (existing && !isNewer(payload.updatedAt, existing.updatedAt)) return;
+      const existing = await tx.orderItem.findFirst({ where: { id: payload.id, merchantId: actor.merchantId } });
+      if (existing && !isClientNewer(operation, existing.updatedAt)) return;
+
+      const data = {
+        orderId: payload.orderId,
+        productId: payload.productId,
+        quantity: payload.quantity,
+        unitPrice: payload.unitPrice,
+        lineTotal: payload.lineTotal,
+        createdAt: new Date(payload.createdAt),
+        deletedAt: dateValue(payload.deletedAt),
+        version: payload.version,
+        ...baseAuditData(existing?.createdByUserId, actor, operation)
+      };
 
       if (existing) {
-        await tx.orderItem.update({
-          where: { id: payload.id },
-          data: {
-            orderId: payload.orderId,
-            productId: payload.productId,
-            quantity: payload.quantity,
-            unitPrice: payload.unitPrice,
-            lineTotal: payload.lineTotal,
-            createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt),
-            deletedAt: dateValue(payload.deletedAt),
-            version: payload.version,
-            lastModifiedByDeviceId: payload.lastModifiedByDeviceId
-          }
-        });
+        await tx.orderItem.update({ where: { id: payload.id }, data });
       } else {
         await tx.orderItem.create({
           data: {
             id: payload.id,
-            merchantId: payload.merchantId,
-            orderId: payload.orderId,
-            productId: payload.productId,
-            quantity: payload.quantity,
-            unitPrice: payload.unitPrice,
-            lineTotal: payload.lineTotal,
-            createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt),
-            deletedAt: dateValue(payload.deletedAt),
-            version: payload.version,
-            lastModifiedByDeviceId: payload.lastModifiedByDeviceId
+            merchantId: actor.merchantId,
+            ...data
           }
         });
       }
@@ -229,46 +252,73 @@ async function upsertEntity(
 
     case "payment": {
       const payload = paymentSchema.parse(operation.payload);
-      ensureMerchantScope(payload.merchantId, merchantId);
+      ensureMerchantScope(payload.merchantId, actor.merchantId);
 
-      const existing = await tx.payment.findFirst({ where: { id: payload.id, merchantId } });
-      if (existing && !isNewer(payload.updatedAt, existing.updatedAt)) return;
+      const existing = await tx.payment.findFirst({ where: { id: payload.id, merchantId: actor.merchantId } });
+      if (existing && !isClientNewer(operation, existing.updatedAt)) return;
+
+      const data = {
+        branchId: payload.branchId ?? null,
+        orderId: payload.orderId,
+        amount: payload.amount,
+        method: payload.method as Prisma.PaymentCreateInput["method"],
+        reference: payload.reference,
+        paidAt: new Date(payload.paidAt),
+        status: payload.status as Prisma.PaymentCreateInput["status"],
+        paynowTransactionId: payload.paynowTransactionId,
+        createdAt: new Date(payload.createdAt),
+        deletedAt: dateValue(payload.deletedAt),
+        version: payload.version,
+        ...baseAuditData(existing?.createdByUserId, actor, operation)
+      };
 
       if (existing) {
-        await tx.payment.update({
-          where: { id: payload.id },
-          data: {
-            orderId: payload.orderId,
-            amount: payload.amount,
-            method: payload.method as Prisma.PaymentUpdateInput["method"],
-            reference: payload.reference,
-            paidAt: new Date(payload.paidAt),
-            status: payload.status as Prisma.PaymentUpdateInput["status"],
-            paynowTransactionId: payload.paynowTransactionId,
-            createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt),
-            deletedAt: dateValue(payload.deletedAt),
-            version: payload.version,
-            lastModifiedByDeviceId: payload.lastModifiedByDeviceId
-          }
-        });
+        await tx.payment.update({ where: { id: payload.id }, data });
       } else {
         await tx.payment.create({
           data: {
             id: payload.id,
-            merchantId: payload.merchantId,
-            orderId: payload.orderId,
-            amount: payload.amount,
-            method: payload.method as Prisma.PaymentCreateInput["method"],
-            reference: payload.reference,
-            paidAt: new Date(payload.paidAt),
-            status: payload.status as Prisma.PaymentCreateInput["status"],
-            paynowTransactionId: payload.paynowTransactionId,
-            createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt),
-            deletedAt: dateValue(payload.deletedAt),
-            version: payload.version,
-            lastModifiedByDeviceId: payload.lastModifiedByDeviceId
+            merchantId: actor.merchantId,
+            ...data
+          }
+        });
+      }
+
+      return;
+    }
+
+    case "paynowTransaction": {
+      const payload = paynowTransactionSchema.parse(operation.payload);
+      ensureMerchantScope(payload.merchantId, actor.merchantId);
+
+      const existing = await tx.paynowTransaction.findFirst({ where: { id: payload.id, merchantId: actor.merchantId } });
+      if (existing && !isClientNewer(operation, existing.updatedAt)) return;
+
+      const data = {
+        branchId: payload.branchId ?? null,
+        orderId: payload.orderId,
+        amount: payload.amount,
+        method: payload.method,
+        phone: payload.phone ?? null,
+        reference: payload.reference,
+        pollUrl: payload.pollUrl,
+        redirectUrl: payload.redirectUrl ?? null,
+        status: payload.status,
+        rawInitResponse: jsonValue(payload.rawInitResponse ?? null),
+        rawLastStatus: jsonValue(payload.rawLastStatus ?? null),
+        createdAt: new Date(payload.createdAt),
+        deletedAt: dateValue(payload.deletedAt),
+        ...baseAuditData(existing?.createdByUserId, actor, operation)
+      };
+
+      if (existing) {
+        await tx.paynowTransaction.update({ where: { id: payload.id }, data });
+      } else {
+        await tx.paynowTransaction.create({
+          data: {
+            id: payload.id,
+            merchantId: actor.merchantId,
+            ...data
           }
         });
       }
@@ -278,42 +328,32 @@ async function upsertEntity(
 
     case "stockMovement": {
       const payload = stockMovementSchema.parse(operation.payload);
-      ensureMerchantScope(payload.merchantId, merchantId);
+      ensureMerchantScope(payload.merchantId, actor.merchantId);
 
-      const existing = await tx.stockMovement.findFirst({ where: { id: payload.id, merchantId } });
-      if (existing && !isNewer(payload.updatedAt, existing.updatedAt)) return;
+      const existing = await tx.stockMovement.findFirst({ where: { id: payload.id, merchantId: actor.merchantId } });
+      if (existing && !isClientNewer(operation, existing.updatedAt)) return;
+
+      const data = {
+        branchId: payload.branchId ?? null,
+        productId: payload.productId,
+        type: payload.type,
+        quantity: payload.quantity,
+        reason: payload.reason,
+        orderId: payload.orderId,
+        createdAt: new Date(payload.createdAt),
+        deletedAt: dateValue(payload.deletedAt),
+        version: payload.version,
+        ...baseAuditData(existing?.createdByUserId, actor, operation)
+      };
 
       if (existing) {
-        await tx.stockMovement.update({
-          where: { id: payload.id },
-          data: {
-            productId: payload.productId,
-            type: payload.type,
-            quantity: payload.quantity,
-            reason: payload.reason,
-            orderId: payload.orderId,
-            createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt),
-            deletedAt: dateValue(payload.deletedAt),
-            version: payload.version,
-            lastModifiedByDeviceId: payload.lastModifiedByDeviceId
-          }
-        });
+        await tx.stockMovement.update({ where: { id: payload.id }, data });
       } else {
         await tx.stockMovement.create({
           data: {
             id: payload.id,
-            merchantId: payload.merchantId,
-            productId: payload.productId,
-            type: payload.type,
-            quantity: payload.quantity,
-            reason: payload.reason,
-            orderId: payload.orderId,
-            createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt),
-            deletedAt: dateValue(payload.deletedAt),
-            version: payload.version,
-            lastModifiedByDeviceId: payload.lastModifiedByDeviceId
+            merchantId: actor.merchantId,
+            ...data
           }
         });
       }
@@ -323,46 +363,33 @@ async function upsertEntity(
 
     case "settings": {
       const payload = settingsSchema.parse(operation.payload);
-      ensureMerchantScope(payload.merchantId, merchantId);
+      ensureMerchantScope(payload.merchantId, actor.merchantId);
 
-      const existing = await tx.settings.findFirst({ where: { id: payload.id, merchantId } });
-      if (existing && !isNewer(payload.updatedAt, existing.updatedAt)) return;
+      const existing = await tx.settings.findFirst({ where: { id: payload.id, merchantId: actor.merchantId } });
+      if (existing && !isClientNewer(operation, existing.updatedAt)) return;
+
+      const data = {
+        businessName: payload.businessName,
+        currencyCode: payload.currencyCode,
+        currencySymbol: payload.currencySymbol,
+        paymentInstructions: payload.paymentInstructions,
+        whatsappTemplate: payload.whatsappTemplate,
+        supportPhone: payload.supportPhone,
+        supportEmail: payload.supportEmail,
+        createdAt: new Date(payload.createdAt),
+        deletedAt: dateValue(payload.deletedAt),
+        version: payload.version,
+        ...baseAuditData(existing?.createdByUserId, actor, operation)
+      };
 
       if (existing) {
-        await tx.settings.update({
-          where: { id: payload.id },
-          data: {
-            businessName: payload.businessName,
-            currencyCode: payload.currencyCode,
-            currencySymbol: payload.currencySymbol,
-            paymentInstructions: payload.paymentInstructions,
-            whatsappTemplate: payload.whatsappTemplate,
-            supportPhone: payload.supportPhone,
-            supportEmail: payload.supportEmail,
-            createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt),
-            deletedAt: dateValue(payload.deletedAt),
-            version: payload.version,
-            lastModifiedByDeviceId: payload.lastModifiedByDeviceId
-          }
-        });
+        await tx.settings.update({ where: { id: payload.id }, data });
       } else {
         await tx.settings.create({
           data: {
             id: payload.id,
-            merchantId: payload.merchantId,
-            businessName: payload.businessName,
-            currencyCode: payload.currencyCode,
-            currencySymbol: payload.currencySymbol,
-            paymentInstructions: payload.paymentInstructions,
-            whatsappTemplate: payload.whatsappTemplate,
-            supportPhone: payload.supportPhone,
-            supportEmail: payload.supportEmail,
-            createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt),
-            deletedAt: dateValue(payload.deletedAt),
-            version: payload.version,
-            lastModifiedByDeviceId: payload.lastModifiedByDeviceId
+            merchantId: actor.merchantId,
+            ...data
           }
         });
       }
@@ -372,12 +399,12 @@ async function upsertEntity(
 
     case "featureFlag": {
       const payload = featureFlagSchema.parse(operation.payload);
-      if (payload.merchantId && payload.merchantId !== merchantId) {
+      if (payload.merchantId && payload.merchantId !== actor.merchantId) {
         throw new HttpError(403, "Cross-tenant payload rejected");
       }
 
       const existing = await tx.featureFlag.findFirst({ where: { id: payload.id } });
-      if (existing && !isNewer(payload.updatedAt, existing.updatedAt)) return;
+      if (existing && !isClientNewer(operation, existing.updatedAt)) return;
 
       if (existing) {
         await tx.featureFlag.update({
@@ -386,7 +413,7 @@ async function upsertEntity(
             key: payload.key,
             enabled: payload.enabled,
             merchantId: payload.merchantId,
-            updatedAt: new Date(payload.updatedAt)
+            updatedAt: clientUpdatedAt(operation)
           }
         });
       } else {
@@ -397,7 +424,7 @@ async function upsertEntity(
             enabled: payload.enabled,
             merchantId: payload.merchantId,
             createdAt: new Date(payload.createdAt),
-            updatedAt: new Date(payload.updatedAt)
+            updatedAt: clientUpdatedAt(operation)
           }
         });
       }
@@ -412,57 +439,54 @@ async function upsertEntity(
 
 async function softDeleteEntity(
   tx: Prisma.TransactionClient,
-  merchantId: string,
+  actor: SyncActorContext,
   operation: SyncOperation
 ): Promise<void> {
-  const when = operation.clientUpdatedAt ? new Date(operation.clientUpdatedAt) : new Date();
+  const when = clientUpdatedAt(operation);
+  const baseDelete = {
+    deletedAt: when,
+    updatedAt: when,
+    updatedByUserId: actor.userId,
+    lastModifiedByDeviceId: actor.deviceId,
+    version: { increment: 1 as const }
+  };
 
   switch (operation.entityType) {
     case "product":
-      await tx.product.updateMany({
-        where: { id: operation.entityId, merchantId },
-        data: { deletedAt: when, updatedAt: when, version: { increment: 1 } }
-      });
+      await tx.product.updateMany({ where: { id: operation.entityId, merchantId: actor.merchantId }, data: baseDelete });
       return;
     case "customer":
-      await tx.customer.updateMany({
-        where: { id: operation.entityId, merchantId },
-        data: { deletedAt: when, updatedAt: when, version: { increment: 1 } }
-      });
+      await tx.customer.updateMany({ where: { id: operation.entityId, merchantId: actor.merchantId }, data: baseDelete });
       return;
     case "order":
-      await tx.order.updateMany({
-        where: { id: operation.entityId, merchantId },
-        data: { deletedAt: when, updatedAt: when, version: { increment: 1 } }
-      });
+      await tx.order.updateMany({ where: { id: operation.entityId, merchantId: actor.merchantId }, data: baseDelete });
       return;
     case "orderItem":
-      await tx.orderItem.updateMany({
-        where: { id: operation.entityId, merchantId },
-        data: { deletedAt: when, updatedAt: when, version: { increment: 1 } }
-      });
+      await tx.orderItem.updateMany({ where: { id: operation.entityId, merchantId: actor.merchantId }, data: baseDelete });
       return;
     case "payment":
-      await tx.payment.updateMany({
-        where: { id: operation.entityId, merchantId },
-        data: { deletedAt: when, updatedAt: when, version: { increment: 1 } }
+      await tx.payment.updateMany({ where: { id: operation.entityId, merchantId: actor.merchantId }, data: baseDelete });
+      return;
+    case "paynowTransaction":
+      await tx.paynowTransaction.updateMany({
+        where: { id: operation.entityId, merchantId: actor.merchantId },
+        data: {
+          deletedAt: when,
+          updatedAt: when,
+          updatedByUserId: actor.userId,
+          lastModifiedByDeviceId: actor.deviceId
+        }
       });
       return;
     case "stockMovement":
-      await tx.stockMovement.updateMany({
-        where: { id: operation.entityId, merchantId },
-        data: { deletedAt: when, updatedAt: when, version: { increment: 1 } }
-      });
+      await tx.stockMovement.updateMany({ where: { id: operation.entityId, merchantId: actor.merchantId }, data: baseDelete });
       return;
     case "settings":
-      await tx.settings.updateMany({
-        where: { id: operation.entityId, merchantId },
-        data: { deletedAt: when, updatedAt: when, version: { increment: 1 } }
-      });
+      await tx.settings.updateMany({ where: { id: operation.entityId, merchantId: actor.merchantId }, data: baseDelete });
       return;
     case "featureFlag":
       await tx.featureFlag.updateMany({
-        where: { id: operation.entityId, OR: [{ merchantId }, { merchantId: null }] },
+        where: { id: operation.entityId, OR: [{ merchantId: actor.merchantId }, { merchantId: null }] },
         data: { deletedAt: when, updatedAt: when }
       });
       return;
@@ -471,7 +495,13 @@ async function softDeleteEntity(
   }
 }
 
-export async function handleSyncPush(prisma: PrismaClient, merchantId: string, input: unknown): Promise<PushResult> {
+export async function handleSyncPush(
+  prisma: PrismaClient,
+  actor: SyncActorContext,
+  input: unknown
+): Promise<PushResult> {
+  await assertSyncActorAllowed(prisma, actor);
+
   const parsed = syncPushSchema.parse(input);
   const acceptedOpIds: string[] = [];
   const rejected: Array<{ opId: string; reason: string }> = [];
@@ -480,7 +510,7 @@ export async function handleSyncPush(prisma: PrismaClient, merchantId: string, i
     const existingLog = await prisma.syncOperationLog.findUnique({
       where: {
         merchantId_opId: {
-          merchantId,
+          merchantId: actor.merchantId,
           opId: operation.opId
         }
       }
@@ -492,16 +522,18 @@ export async function handleSyncPush(prisma: PrismaClient, merchantId: string, i
     }
 
     try {
+      ensureOperationActor(operation, actor);
+
       await prisma.$transaction(async (tx) => {
         if (operation.opType === "UPSERT") {
-          await upsertEntity(tx, merchantId, operation);
+          await upsertEntity(tx, actor, operation);
         } else {
-          await softDeleteEntity(tx, merchantId, operation);
+          await softDeleteEntity(tx, actor, operation);
         }
 
         await tx.syncOperationLog.create({
           data: {
-            merchantId,
+            merchantId: actor.merchantId,
             opId: operation.opId,
             entityType: operation.entityType,
             opType: operation.opType,
@@ -519,7 +551,7 @@ export async function handleSyncPush(prisma: PrismaClient, merchantId: string, i
 
       await prisma.syncOperationLog.create({
         data: {
-          merchantId,
+          merchantId: actor.merchantId,
           opId: operation.opId,
           entityType: operation.entityType,
           opType: operation.opType,
@@ -540,24 +572,27 @@ export async function handleSyncPush(prisma: PrismaClient, merchantId: string, i
 
 export async function handleSyncPull(
   prisma: PrismaClient,
-  merchantId: string,
+  actor: SyncActorContext,
   since?: string
 ): Promise<Record<string, unknown>> {
+  await assertSyncActorAllowed(prisma, actor);
+
   const sinceDate = since ? new Date(since) : undefined;
   const updatedFilter = sinceDate ? { updatedAt: { gt: sinceDate } } : {};
 
-  const [products, customers, orders, orderItems, payments, stockMovements, settings, featureFlags] =
+  const [products, customers, orders, orderItems, payments, paynowTransactions, stockMovements, settings, featureFlags] =
     await Promise.all([
-      prisma.product.findMany({ where: { merchantId, ...updatedFilter } }),
-      prisma.customer.findMany({ where: { merchantId, ...updatedFilter } }),
-      prisma.order.findMany({ where: { merchantId, ...updatedFilter } }),
-      prisma.orderItem.findMany({ where: { merchantId, ...updatedFilter } }),
-      prisma.payment.findMany({ where: { merchantId, ...updatedFilter } }),
-      prisma.stockMovement.findMany({ where: { merchantId, ...updatedFilter } }),
-      prisma.settings.findMany({ where: { merchantId, ...updatedFilter } }),
+      prisma.product.findMany({ where: { merchantId: actor.merchantId, ...updatedFilter } }),
+      prisma.customer.findMany({ where: { merchantId: actor.merchantId, ...updatedFilter } }),
+      prisma.order.findMany({ where: { merchantId: actor.merchantId, ...updatedFilter } }),
+      prisma.orderItem.findMany({ where: { merchantId: actor.merchantId, ...updatedFilter } }),
+      prisma.payment.findMany({ where: { merchantId: actor.merchantId, ...updatedFilter } }),
+      prisma.paynowTransaction.findMany({ where: { merchantId: actor.merchantId, ...updatedFilter } }),
+      prisma.stockMovement.findMany({ where: { merchantId: actor.merchantId, ...updatedFilter } }),
+      prisma.settings.findMany({ where: { merchantId: actor.merchantId, ...updatedFilter } }),
       prisma.featureFlag.findMany({
         where: {
-          OR: [{ merchantId }, { merchantId: null }],
+          OR: [{ merchantId: actor.merchantId }, { merchantId: null }],
           ...(sinceDate ? { updatedAt: { gt: sinceDate } } : {})
         }
       })
@@ -566,13 +601,20 @@ export async function handleSyncPull(
   return toPlain({
     serverTime: new Date().toISOString(),
     changes: {
+      branches: [],
       products,
+      productStocks: [],
       customers,
       orders,
       orderItems,
       payments,
+      paynowTransactions,
       stockMovements,
+      transfers: [],
+      transferItems: [],
+      deliveries: [],
       settings,
+      catalogSettings: [],
       featureFlags
     }
   });

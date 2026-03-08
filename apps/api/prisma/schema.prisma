@@ -242,6 +242,22 @@ model User {
   userAuth         UserAuth?
   devices          Device[]
   auditLogs        AuditLog[]
+  createdProducts  Product[]         @relation("ProductCreatedBy")
+  updatedProducts  Product[]         @relation("ProductUpdatedBy")
+  createdCustomers Customer[]        @relation("CustomerCreatedBy")
+  updatedCustomers Customer[]        @relation("CustomerUpdatedBy")
+  createdOrders    Order[]           @relation("OrderCreatedBy")
+  updatedOrders    Order[]           @relation("OrderUpdatedBy")
+  createdOrderItems OrderItem[]      @relation("OrderItemCreatedBy")
+  updatedOrderItems OrderItem[]      @relation("OrderItemUpdatedBy")
+  createdPayments  Payment[]         @relation("PaymentCreatedBy")
+  updatedPayments  Payment[]         @relation("PaymentUpdatedBy")
+  createdMovements StockMovement[]   @relation("StockMovementCreatedBy")
+  updatedMovements StockMovement[]   @relation("StockMovementUpdatedBy")
+  createdSettings  Settings[]        @relation("SettingsCreatedBy")
+  updatedSettings  Settings[]        @relation("SettingsUpdatedBy")
+  createdPaynowTransactions PaynowTransaction[] @relation("PaynowTransactionCreatedBy")
+  updatedPaynowTransactions PaynowTransaction[] @relation("PaynowTransactionUpdatedBy")
   requestedTransfers StockTransfer[] @relation("RequestedTransferBy")
   approvedTransfers StockTransfer[]  @relation("ApprovedTransferBy")
   receivedTransfers StockTransfer[]  @relation("ReceivedTransferBy")
@@ -295,6 +311,8 @@ model Device {
 model Product {
   id                     String   @id
   merchantId             String
+  createdByUserId        String?
+  updatedByUserId        String?
   name                   String
   price                  Decimal  @db.Decimal(12, 2)
   cost                   Decimal? @db.Decimal(12, 2)
@@ -312,6 +330,8 @@ model Product {
   lastModifiedByDeviceId String
 
   merchant        Merchant           @relation(fields: [merchantId], references: [id])
+  createdByUser   User?              @relation("ProductCreatedBy", fields: [createdByUserId], references: [id])
+  updatedByUser   User?              @relation("ProductUpdatedBy", fields: [updatedByUserId], references: [id])
   items           OrderItem[]
   stockMovements  StockMovement[]
   productStocks   ProductStock[]
@@ -319,6 +339,8 @@ model Product {
   kitchenTicketItems KitchenTicketItem[]
 
   @@index([merchantId])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
   @@index([updatedAt])
 }
 
@@ -348,6 +370,8 @@ model ProductStock {
 model Customer {
   id                     String   @id
   merchantId             String
+  createdByUserId        String?
+  updatedByUserId        String?
   name                   String
   phone                  String?
   notes                  String?
@@ -358,9 +382,13 @@ model Customer {
   lastModifiedByDeviceId String
 
   merchant Merchant @relation(fields: [merchantId], references: [id])
+  createdByUser User?   @relation("CustomerCreatedBy", fields: [createdByUserId], references: [id])
+  updatedByUser User?   @relation("CustomerUpdatedBy", fields: [updatedByUserId], references: [id])
   orders   Order[]
 
   @@index([merchantId])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
   @@index([updatedAt])
 }
 
@@ -369,6 +397,8 @@ model Order {
   merchantId             String
   branchId               String?
   customerId             String?
+  createdByUserId        String?
+  updatedByUserId        String?
   orderNumber            String
   status                 OrderStatus
   documentType           OrderDocumentType @default(ORDER)
@@ -390,6 +420,8 @@ model Order {
   merchant           Merchant            @relation(fields: [merchantId], references: [id])
   branch             Branch?             @relation(fields: [branchId], references: [id])
   customer           Customer?           @relation(fields: [customerId], references: [id])
+  createdByUser      User?               @relation("OrderCreatedBy", fields: [createdByUserId], references: [id])
+  updatedByUser      User?               @relation("OrderUpdatedBy", fields: [updatedByUserId], references: [id])
   items              OrderItem[]
   payments           Payment[]
   movements          StockMovement[]
@@ -400,6 +432,8 @@ model Order {
 
   @@index([merchantId])
   @@index([branchId])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
   @@index([updatedAt])
 }
 
@@ -408,6 +442,8 @@ model OrderItem {
   merchantId             String
   orderId                String
   productId              String
+  createdByUserId        String?
+  updatedByUserId        String?
   quantity               Decimal  @db.Decimal(12, 3)
   unitPrice              Decimal  @db.Decimal(12, 2)
   lineTotal              Decimal  @db.Decimal(12, 2)
@@ -420,8 +456,12 @@ model OrderItem {
   merchant Merchant @relation(fields: [merchantId], references: [id])
   order    Order    @relation(fields: [orderId], references: [id])
   product  Product  @relation(fields: [productId], references: [id])
+  createdByUser User? @relation("OrderItemCreatedBy", fields: [createdByUserId], references: [id])
+  updatedByUser User? @relation("OrderItemUpdatedBy", fields: [updatedByUserId], references: [id])
 
   @@index([merchantId])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
   @@index([updatedAt])
 }
 
@@ -430,6 +470,8 @@ model Payment {
   merchantId             String
   branchId               String?
   orderId                String
+  createdByUserId        String?
+  updatedByUserId        String?
   amount                 Decimal             @db.Decimal(12, 2)
   method                 PaymentMethod
   reference              String?
@@ -445,9 +487,13 @@ model Payment {
   merchant Merchant @relation(fields: [merchantId], references: [id])
   branch   Branch?  @relation(fields: [branchId], references: [id])
   order    Order    @relation(fields: [orderId], references: [id])
+  createdByUser User? @relation("PaymentCreatedBy", fields: [createdByUserId], references: [id])
+  updatedByUser User? @relation("PaymentUpdatedBy", fields: [updatedByUserId], references: [id])
 
   @@index([merchantId])
   @@index([branchId])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
   @@index([updatedAt])
 }
 
@@ -456,6 +502,8 @@ model StockMovement {
   merchantId             String
   branchId               String?
   productId              String
+  createdByUserId        String?
+  updatedByUserId        String?
   type                   StockMovementType
   quantity               Decimal           @db.Decimal(12, 3)
   reason                 String?
@@ -470,9 +518,13 @@ model StockMovement {
   branch   Branch?  @relation(fields: [branchId], references: [id])
   product  Product  @relation(fields: [productId], references: [id])
   order    Order?   @relation(fields: [orderId], references: [id])
+  createdByUser User? @relation("StockMovementCreatedBy", fields: [createdByUserId], references: [id])
+  updatedByUser User? @relation("StockMovementUpdatedBy", fields: [updatedByUserId], references: [id])
 
   @@index([merchantId])
   @@index([branchId])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
   @@index([updatedAt])
 }
 
@@ -552,6 +604,8 @@ model Delivery {
 model Settings {
   id                     String   @id
   merchantId             String
+  createdByUserId        String?
+  updatedByUserId        String?
   businessName           String
   currencyCode           String
   currencySymbol         String
@@ -566,9 +620,13 @@ model Settings {
   lastModifiedByDeviceId String
 
   merchant Merchant @relation(fields: [merchantId], references: [id])
+  createdByUser User?   @relation("SettingsCreatedBy", fields: [createdByUserId], references: [id])
+  updatedByUser User?   @relation("SettingsUpdatedBy", fields: [updatedByUserId], references: [id])
 
   @@unique([merchantId])
   @@index([merchantId])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
   @@index([updatedAt])
 }
 
@@ -672,6 +730,8 @@ model PaynowTransaction {
   merchantId      String
   branchId        String?
   orderId         String
+  createdByUserId String?
+  updatedByUserId String?
   amount          Decimal  @db.Decimal(12, 2)
   method          String
   phone           String?
@@ -684,14 +744,19 @@ model PaynowTransaction {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   deletedAt       DateTime?
+  lastModifiedByDeviceId String @default("server-paynow")
 
   merchant Merchant @relation(fields: [merchantId], references: [id])
   branch   Branch?  @relation(fields: [branchId], references: [id])
   order    Order    @relation(fields: [orderId], references: [id])
+  createdByUser User? @relation("PaynowTransactionCreatedBy", fields: [createdByUserId], references: [id])
+  updatedByUser User? @relation("PaynowTransactionUpdatedBy", fields: [updatedByUserId], references: [id])
 
   @@index([merchantId])
   @@index([branchId])
   @@index([orderId])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
   @@index([updatedAt])
 }
 

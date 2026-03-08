@@ -69,6 +69,8 @@ paymentsRouter.post(
         merchantId,
         branchId: order.branchId ?? req.user!.branchId ?? null,
         orderId: body.orderId,
+        createdByUserId: req.user!.userId,
+        updatedByUserId: req.user!.userId,
         amount: body.amount,
         method: body.method,
         reference: body.reference ?? null,
@@ -82,7 +84,10 @@ paymentsRouter.post(
       }
     });
 
-    await updateOrderPaymentStatus(prisma, order.id, merchantId);
+    await updateOrderPaymentStatus(prisma, order.id, merchantId, {
+      userId: req.user!.userId,
+      deviceId: req.user!.deviceId
+    });
 
     await recordAudit(prisma, req.user!, {
       action: "payment.create",
@@ -109,7 +114,9 @@ paymentsRouter.post(
   asyncHandler(async (req, res) => {
     const result = await initiatePaynow(prisma, req.user!.merchantId, req.user!.identifier, {
       ...(req.body as Record<string, unknown>),
-      branchId: req.user!.branchId ?? null
+      branchId: req.user!.branchId ?? null,
+      userId: req.user!.userId,
+      deviceId: req.user!.deviceId
     });
 
     await recordAudit(prisma, req.user!, {

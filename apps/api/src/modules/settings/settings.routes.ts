@@ -111,6 +111,8 @@ settingsRouter.get(
         data: {
           id: randomUUID(),
           merchantId,
+          createdByUserId: req.user!.userId,
+          updatedByUserId: req.user!.userId,
           businessName: "My Business",
           currencyCode: "USD",
           currencySymbol: "$",
@@ -150,6 +152,7 @@ settingsRouter.put(
           data: {
             ...body,
             updatedAt: now,
+            updatedByUserId: req.user!.userId,
             version: { increment: 1 },
             lastModifiedByDeviceId: req.user!.deviceId
           }
@@ -158,6 +161,8 @@ settingsRouter.put(
           data: {
             id: randomUUID(),
             merchantId,
+            createdByUserId: req.user!.userId,
+            updatedByUserId: req.user!.userId,
             businessName: body.businessName ?? "My Business",
             currencyCode: body.currencyCode ?? "USD",
             currencySymbol: body.currencySymbol ?? "$",

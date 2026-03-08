@@ -41,6 +41,8 @@ const baseEntitySchema = z.object({
   id: z.string().uuid(),
   merchantId: z.string().uuid(),
   branchId: z.string().uuid().nullable().optional(),
+  createdByUserId: z.string().uuid().nullable().optional(),
+  updatedByUserId: z.string().uuid().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable(),
@@ -113,6 +115,19 @@ export const paymentSchema = baseEntitySchema.extend({
   paynowTransactionId: z.string().uuid().nullable()
 });
 
+export const paynowTransactionSchema = baseEntitySchema.extend({
+  orderId: z.string().uuid(),
+  amount: z.number().positive(),
+  method: z.string().trim().min(1).max(60),
+  phone: z.string().trim().max(20).nullable().optional(),
+  reference: z.string().trim().min(1).max(120),
+  pollUrl: z.string().trim().min(1),
+  redirectUrl: z.string().trim().nullable().optional(),
+  status: z.string().trim().min(1).max(40),
+  rawInitResponse: z.record(z.any()).nullable().optional(),
+  rawLastStatus: z.record(z.any()).nullable().optional()
+});
+
 export const stockMovementSchema = baseEntitySchema.extend({
   productId: z.string().uuid(),
   type: z.enum(stockMovementTypeValues),
@@ -178,7 +193,9 @@ export const syncOperationSchema = z.object({
   opType: z.enum(syncOpTypeValues),
   entityId: z.string().uuid(),
   payload: z.record(z.any()),
-  clientUpdatedAt: z.string().datetime()
+  clientUpdatedAt: z.string().datetime(),
+  userId: z.string().uuid(),
+  deviceId: z.string().min(1).max(120)
 });
 
 export const syncPushSchema = z.object({

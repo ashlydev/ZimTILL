@@ -155,6 +155,8 @@ export async function register(
       data: {
         id: randomUUID(),
         merchantId,
+        createdByUserId: userId,
+        updatedByUserId: userId,
         businessName,
         currencyCode: "USD",
         currencySymbol: "$",

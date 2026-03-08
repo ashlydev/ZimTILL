@@ -17,6 +17,8 @@ export type BaseEntity = {
   id: string;
   merchantId: string;
   branchId?: string | null;
+  createdByUserId?: string | null;
+  updatedByUserId?: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -146,6 +148,19 @@ export type Payment = BaseEntity & {
   paynowTransactionId: string | null;
 };
 
+export type PaynowTransaction = BaseEntity & {
+  orderId: string;
+  amount: number;
+  method: string;
+  phone: string | null;
+  reference: string;
+  pollUrl: string;
+  redirectUrl: string | null;
+  status: string;
+  rawInitResponse?: Record<string, unknown> | null;
+  rawLastStatus?: Record<string, unknown> | null;
+};
+
 export type StockMovement = BaseEntity & {
   productId: string;
   type: StockMovementType;
@@ -212,10 +227,18 @@ export type SyncOperation = {
   entityId: string;
   payload: Record<string, unknown>;
   clientUpdatedAt: string;
+  userId: string;
+  deviceId: string;
 };
 
 export type SyncPushRequest = {
   operations: SyncOperation[];
+};
+
+export type SyncPushResponse = {
+  acceptedOpIds: string[];
+  rejected: Array<{ opId: string; reason: string }>;
+  serverTime: string;
 };
 
 export type SyncPullResponse = {
@@ -228,6 +251,7 @@ export type SyncPullResponse = {
     orders: Order[];
     orderItems: OrderItem[];
     payments: Payment[];
+    paynowTransactions: PaynowTransaction[];
     stockMovements: StockMovement[];
     transfers: StockTransfer[];
     transferItems: StockTransferItem[];

@@ -7,6 +7,8 @@ const migrationStatements = [
   `CREATE TABLE IF NOT EXISTS products (
     id TEXT PRIMARY KEY NOT NULL,
     merchant_id TEXT NOT NULL,
+    created_by_user_id TEXT,
+    updated_by_user_id TEXT,
     name TEXT NOT NULL,
     price REAL NOT NULL,
     cost REAL,
@@ -22,6 +24,8 @@ const migrationStatements = [
   `CREATE TABLE IF NOT EXISTS customers (
     id TEXT PRIMARY KEY NOT NULL,
     merchant_id TEXT NOT NULL,
+    created_by_user_id TEXT,
+    updated_by_user_id TEXT,
     name TEXT NOT NULL,
     phone TEXT,
     notes TEXT,
@@ -35,6 +39,8 @@ const migrationStatements = [
     id TEXT PRIMARY KEY NOT NULL,
     merchant_id TEXT NOT NULL,
     customer_id TEXT,
+    created_by_user_id TEXT,
+    updated_by_user_id TEXT,
     order_number TEXT NOT NULL,
     status TEXT NOT NULL,
     subtotal REAL NOT NULL,
@@ -54,6 +60,8 @@ const migrationStatements = [
     merchant_id TEXT NOT NULL,
     order_id TEXT NOT NULL,
     product_id TEXT NOT NULL,
+    created_by_user_id TEXT,
+    updated_by_user_id TEXT,
     quantity REAL NOT NULL,
     unit_price REAL NOT NULL,
     line_total REAL NOT NULL,
@@ -67,6 +75,8 @@ const migrationStatements = [
     id TEXT PRIMARY KEY NOT NULL,
     merchant_id TEXT NOT NULL,
     order_id TEXT NOT NULL,
+    created_by_user_id TEXT,
+    updated_by_user_id TEXT,
     amount REAL NOT NULL,
     method TEXT NOT NULL,
     reference TEXT,
@@ -83,6 +93,8 @@ const migrationStatements = [
     id TEXT PRIMARY KEY NOT NULL,
     merchant_id TEXT NOT NULL,
     product_id TEXT NOT NULL,
+    created_by_user_id TEXT,
+    updated_by_user_id TEXT,
     type TEXT NOT NULL,
     quantity REAL NOT NULL,
     reason TEXT,
@@ -96,6 +108,8 @@ const migrationStatements = [
   `CREATE TABLE IF NOT EXISTS settings (
     id TEXT PRIMARY KEY NOT NULL,
     merchant_id TEXT NOT NULL UNIQUE,
+    created_by_user_id TEXT,
+    updated_by_user_id TEXT,
     business_name TEXT NOT NULL,
     currency_code TEXT NOT NULL,
     currency_symbol TEXT NOT NULL,
@@ -124,8 +138,26 @@ const migrationStatements = [
     entity_id TEXT NOT NULL,
     op_type TEXT NOT NULL,
     payload TEXT NOT NULL,
+    user_id TEXT,
+    device_id TEXT,
     created_at TEXT NOT NULL
   );`,
+  `ALTER TABLE products ADD COLUMN created_by_user_id TEXT;`,
+  `ALTER TABLE products ADD COLUMN updated_by_user_id TEXT;`,
+  `ALTER TABLE customers ADD COLUMN created_by_user_id TEXT;`,
+  `ALTER TABLE customers ADD COLUMN updated_by_user_id TEXT;`,
+  `ALTER TABLE orders ADD COLUMN created_by_user_id TEXT;`,
+  `ALTER TABLE orders ADD COLUMN updated_by_user_id TEXT;`,
+  `ALTER TABLE order_items ADD COLUMN created_by_user_id TEXT;`,
+  `ALTER TABLE order_items ADD COLUMN updated_by_user_id TEXT;`,
+  `ALTER TABLE payments ADD COLUMN created_by_user_id TEXT;`,
+  `ALTER TABLE payments ADD COLUMN updated_by_user_id TEXT;`,
+  `ALTER TABLE stock_movements ADD COLUMN created_by_user_id TEXT;`,
+  `ALTER TABLE stock_movements ADD COLUMN updated_by_user_id TEXT;`,
+  `ALTER TABLE settings ADD COLUMN created_by_user_id TEXT;`,
+  `ALTER TABLE settings ADD COLUMN updated_by_user_id TEXT;`,
+  `ALTER TABLE outbox ADD COLUMN user_id TEXT;`,
+  `ALTER TABLE outbox ADD COLUMN device_id TEXT;`,
   `CREATE TABLE IF NOT EXISTS sync_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     last_pull_at TEXT,
@@ -145,7 +177,14 @@ const migrationStatements = [
 
 async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
   for (const statement of migrationStatements) {
-    await db.execAsync(statement);
+    try {
+      await db.execAsync(statement);
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : "";
+      if (!message.includes("duplicate column")) {
+        throw error;
+      }
+    }
   }
 
   const existing = await db.getFirstAsync<{ id: number }>("SELECT id FROM sync_state WHERE id = 1;");

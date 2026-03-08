@@ -106,6 +106,8 @@ ordersRouter.post(
           merchantId,
           branchId,
           customerId: body.customerId ?? null,
+          createdByUserId: req.user!.userId,
+          updatedByUserId: req.user!.userId,
           orderNumber,
           status: "DRAFT",
           documentType: "ORDER",
@@ -134,6 +136,8 @@ ordersRouter.post(
             merchantId,
             orderId,
             productId: product.id,
+            createdByUserId: req.user!.userId,
+            updatedByUserId: req.user!.userId,
             quantity: item.quantity,
             unitPrice: Number(product.price),
             lineTotal,
@@ -215,6 +219,7 @@ ordersRouter.put(
       data: {
         ...body,
         updatedAt: new Date(),
+        updatedByUserId: req.user!.userId,
         version: { increment: 1 },
         lastModifiedByDeviceId: req.user!.deviceId
       }
@@ -260,6 +265,7 @@ ordersRouter.post(
           status: "CONFIRMED",
           confirmedAt: now,
           updatedAt: now,
+          updatedByUserId: req.user!.userId,
           version: { increment: 1 },
           lastModifiedByDeviceId: req.user!.deviceId
         }
@@ -279,13 +285,13 @@ ordersRouter.post(
           if (branchStock) {
             await tx.productStock.update({
               where: { id: branchStock.id },
-              data: {
-                qty: Number(branchStock.qty) - Number(item.quantity),
-                updatedAt: now,
-                version: { increment: 1 },
-                lastModifiedByDeviceId: req.user!.deviceId
-              }
-            });
+            data: {
+              qty: Number(branchStock.qty) - Number(item.quantity),
+              updatedAt: now,
+              version: { increment: 1 },
+              lastModifiedByDeviceId: req.user!.deviceId
+            }
+          });
           }
         }
 
@@ -294,6 +300,7 @@ ordersRouter.post(
           data: {
             stockQty: Number(product.stockQty) - Number(item.quantity),
             updatedAt: now,
+            updatedByUserId: req.user!.userId,
             version: { increment: 1 },
             lastModifiedByDeviceId: req.user!.deviceId
           }
@@ -305,6 +312,8 @@ ordersRouter.post(
             merchantId,
             branchId: order.branchId ?? null,
             productId: product.id,
+            createdByUserId: req.user!.userId,
+            updatedByUserId: req.user!.userId,
             type: "OUT",
             quantity: -Number(item.quantity),
             reason: `Order confirmed ${order.orderNumber}`,
@@ -360,6 +369,7 @@ ordersRouter.post(
         data: {
           status: "CANCELLED",
           updatedAt: now,
+          updatedByUserId: req.user!.userId,
           version: { increment: 1 },
           lastModifiedByDeviceId: req.user!.deviceId
         }
@@ -381,13 +391,13 @@ ordersRouter.post(
             if (branchStock) {
               await tx.productStock.update({
                 where: { id: branchStock.id },
-                data: {
-                  qty: Number(branchStock.qty) + Number(item.quantity),
-                  updatedAt: now,
-                  version: { increment: 1 },
-                  lastModifiedByDeviceId: req.user!.deviceId
-                }
-              });
+              data: {
+                qty: Number(branchStock.qty) + Number(item.quantity),
+                updatedAt: now,
+                version: { increment: 1 },
+                lastModifiedByDeviceId: req.user!.deviceId
+              }
+            });
             }
           }
 
@@ -396,6 +406,7 @@ ordersRouter.post(
             data: {
               stockQty: Number(product.stockQty) + Number(item.quantity),
               updatedAt: now,
+              updatedByUserId: req.user!.userId,
               version: { increment: 1 },
               lastModifiedByDeviceId: req.user!.deviceId
             }
@@ -407,6 +418,8 @@ ordersRouter.post(
               merchantId,
               branchId: order.branchId ?? null,
               productId: product.id,
+              createdByUserId: req.user!.userId,
+              updatedByUserId: req.user!.userId,
               type: "IN",
               quantity: Number(item.quantity),
               reason: `Order cancelled ${order.orderNumber}`,

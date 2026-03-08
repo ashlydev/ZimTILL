@@ -61,6 +61,8 @@ customersRouter.post(
       data: {
         id: randomUUID(),
         merchantId: req.user!.merchantId,
+        createdByUserId: req.user!.userId,
+        updatedByUserId: req.user!.userId,
         name: body.name,
         phone: body.phone ?? null,
         notes: body.notes ?? null,
@@ -102,6 +104,7 @@ customersRouter.put(
       data: {
         ...body,
         updatedAt: new Date(),
+        updatedByUserId: req.user!.userId,
         version: { increment: 1 },
         lastModifiedByDeviceId: req.user!.deviceId
       }
@@ -135,6 +138,7 @@ customersRouter.delete(
       data: {
         deletedAt: new Date(),
         updatedAt: new Date(),
+        updatedByUserId: req.user!.userId,
         version: { increment: 1 },
         lastModifiedByDeviceId: req.user!.deviceId
       }

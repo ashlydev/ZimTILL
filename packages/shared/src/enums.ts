@@ -50,6 +50,7 @@ export const syncEntityTypeValues = [
   "order",
   "orderItem",
   "payment",
+  "paynowTransaction",
   "stockMovement",
   "stockTransfer",
   "stockTransferItem",
