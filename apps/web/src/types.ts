@@ -1,4 +1,15 @@
 export type Role = "OWNER" | "ADMIN" | "MANAGER" | "CASHIER" | "STOCK_CONTROLLER" | "DELIVERY_RIDER";
+export type InventoryAdjustmentReason = "RETURN" | "EXPIRED" | "DAMAGED";
+
+type SyncBaseEntity = {
+  merchantId: string;
+  branchId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  version: number;
+  lastModifiedByDeviceId: string;
+};
 
 export type OrderStatus = "DRAFT" | "SENT" | "CONFIRMED" | "PARTIALLY_PAID" | "PAID" | "CANCELLED";
 export type OrderDocumentType = "ORDER" | "QUOTE" | "INVOICE";
@@ -70,7 +81,7 @@ export type User = {
   isPlatformAdmin?: boolean;
 };
 
-export type Product = {
+export type Product = SyncBaseEntity & {
   id: string;
   name: string;
   price: number;
@@ -83,7 +94,7 @@ export type Product = {
   branchLowStockThreshold?: number;
   isPublished?: boolean;
   isActive?: boolean;
-  updatedAt: string;
+  deletedAt?: string | null;
 };
 
 export type ProductStock = {
@@ -96,17 +107,15 @@ export type ProductStock = {
   product?: Product;
 };
 
-export type Customer = {
+export type Customer = SyncBaseEntity & {
   id: string;
   name: string;
   phone?: string | null;
   notes?: string | null;
-  updatedAt: string;
 };
 
-export type Order = {
+export type Order = SyncBaseEntity & {
   id: string;
-  branchId?: string | null;
   customerId?: string | null;
   orderNumber: string;
   status: OrderStatus;
@@ -119,46 +128,41 @@ export type Order = {
   notes?: string | null;
   customerName?: string | null;
   customerPhone?: string | null;
-  createdAt: string;
-  updatedAt: string;
+  confirmedAt?: string | null;
   customer?: Customer | null;
   delivery?: Delivery | null;
 };
 
-export type OrderItem = {
+export type OrderItem = SyncBaseEntity & {
   id: string;
   orderId: string;
   productId: string;
   quantity: number;
   unitPrice: number;
   lineTotal: number;
-  product?: Product;
+  product?: Product | null;
 };
 
-export type Payment = {
+export type Payment = SyncBaseEntity & {
   id: string;
   orderId: string;
-  branchId?: string | null;
   amount: number;
   method: PaymentMethod;
   reference?: string | null;
   paidAt: string;
   status: PaymentRecordStatus;
-  createdAt: string;
   paynowTransactionId?: string | null;
 };
 
-export type StockMovement = {
+export type StockMovement = SyncBaseEntity & {
   id: string;
-  branchId?: string | null;
   productId: string;
   type: "IN" | "OUT" | "ADJUSTMENT" | "TRANSFER_OUT" | "TRANSFER_IN";
   quantity: number;
   reason?: string | null;
   orderId?: string | null;
-  createdAt: string;
-  product?: Product;
-  order?: Order;
+  product?: Product | null;
+  order?: Order | null;
 };
 
 export type StockTransfer = {
@@ -202,7 +206,7 @@ export type Delivery = {
   } | null;
 };
 
-export type Settings = {
+export type Settings = SyncBaseEntity & {
   id: string;
   businessName: string;
   currencyCode: "USD" | "ZWL";
@@ -240,6 +244,14 @@ export type ReportsSummary = {
     salesTotal: number;
     ordersCount: number;
     topProducts: Array<{ productId: string; name: string; qty: number }>;
+  };
+  returnsExpired?: {
+    returnsCount: number;
+    returnsValue: number;
+    expiredCount: number;
+    expiredValue: number;
+    damagedCount: number;
+    damagedValue: number;
   };
 };
 

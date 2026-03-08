@@ -22,6 +22,31 @@ import type {
   Subscription,
   UsageCounter
 } from "../types";
+import {
+  addPaymentLocal,
+  adjustStockLocal,
+  buildWhatsappOrderTextLocal,
+  cancelOrderLocal,
+  confirmOrderLocal,
+  createOrderLocal,
+  deleteCustomerLocal,
+  deleteProductLocal,
+  getLowStockLocal,
+  getOrderDetailsLocal,
+  getReceiptLocal,
+  getReportsLocal,
+  listCustomersLocal,
+  listOrdersLocal,
+  listPaymentsLocal,
+  listProductsLocal,
+  listStockMovementsLocal,
+  onlinePaymentsMessage,
+  recordInventoryAdjustmentLocal,
+  saveCustomerLocal,
+  saveProductLocal,
+  syncOfflineCore
+} from "./offlineCore";
+import { getAuthSnapshot } from "./storage";
 
 const ENV_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").trim();
 const LOCAL_DEV_HOSTS = new Set(["localhost", "127.0.0.1"]);
@@ -179,63 +204,79 @@ export const api = {
     });
   },
   listProducts(token: string, search = "", lowStockOnly = false, branchId?: string | null) {
-    const params = new URLSearchParams();
-    if (search.trim()) params.set("search", search.trim());
-    if (lowStockOnly) params.set("lowStock", "true");
-    if (branchId) params.set("branchId", branchId);
-    return apiRequest<{ products: Product[] }>(`/products${params.toString() ? `?${params.toString()}` : ""}`, { token });
+    void token;
+    void branchId;
+    return listProductsLocal(search, lowStockOnly).then((products) => ({ products }));
   },
   createProduct(token: string, payload: Partial<Product>) {
-    return apiRequest<{ product: Product }>("/products", {
-      method: "POST",
-      token,
-      body: JSON.stringify(payload)
-    });
+    void token;
+    return saveProductLocal({
+      id: payload.id,
+      name: String(payload.name ?? ""),
+      price: Number(payload.price ?? 0),
+      cost: payload.cost ?? null,
+      sku: payload.sku ?? null,
+      stockQty: Number(payload.stockQty ?? 0),
+      lowStockThreshold: Number(payload.lowStockThreshold ?? 0)
+    }).then((product) => ({ product }));
   },
   updateProduct(token: string, id: string, payload: Partial<Product>) {
-    return apiRequest<{ product: Product }>(`/products/${id}`, {
-      method: "PUT",
-      token,
-      body: JSON.stringify(payload)
-    });
+    void token;
+    return saveProductLocal({
+      id,
+      name: String(payload.name ?? ""),
+      price: Number(payload.price ?? 0),
+      cost: payload.cost ?? null,
+      sku: payload.sku ?? null,
+      stockQty: Number(payload.stockQty ?? 0),
+      lowStockThreshold: Number(payload.lowStockThreshold ?? 0)
+    }).then((product) => ({ product }));
   },
   deleteProduct(token: string, id: string) {
-    return apiRequest<{ product: Product }>(`/products/${id}`, { method: "DELETE", token });
+    void token;
+    return deleteProductLocal(id).then(async () => ({ product: (await listProductsLocal()).find((product) => product.id === id)! }));
   },
   adjustStock(token: string, id: string, quantity: number, reason?: string) {
-    return apiRequest<{ product: Product }>(`/products/${id}/adjust-stock`, {
-      method: "POST",
-      token,
-      body: JSON.stringify({ quantity, reason })
-    });
+    void token;
+    return adjustStockLocal(id, quantity, reason).then((product) => ({ product }));
+  },
+  recordInventoryAdjustment(
+    token: string,
+    payload: { productId: string; quantity: number; reason: "RETURN" | "EXPIRED" | "DAMAGED"; notes?: string; orderId?: string | null; occurredAt?: string }
+  ) {
+    void token;
+    return recordInventoryAdjustmentLocal(payload).then((movement) => ({ movement }));
   },
   listCustomers(token: string, search = "") {
-    const params = new URLSearchParams();
-    if (search.trim()) params.set("search", search.trim());
-    return apiRequest<{ customers: Customer[] }>(`/customers${params.toString() ? `?${params.toString()}` : ""}`, { token });
+    void token;
+    return listCustomersLocal(search).then((customers) => ({ customers }));
   },
   createCustomer(token: string, payload: Partial<Customer>) {
-    return apiRequest<{ customer: Customer }>("/customers", {
-      method: "POST",
-      token,
-      body: JSON.stringify(payload)
-    });
+    void token;
+    return saveCustomerLocal({
+      id: payload.id,
+      name: String(payload.name ?? ""),
+      phone: payload.phone ?? null,
+      notes: payload.notes ?? null
+    }).then((customer) => ({ customer }));
   },
   updateCustomer(token: string, id: string, payload: Partial<Customer>) {
-    return apiRequest<{ customer: Customer }>(`/customers/${id}`, {
-      method: "PUT",
-      token,
-      body: JSON.stringify(payload)
-    });
+    void token;
+    return saveCustomerLocal({
+      id,
+      name: String(payload.name ?? ""),
+      phone: payload.phone ?? null,
+      notes: payload.notes ?? null
+    }).then((customer) => ({ customer }));
   },
   deleteCustomer(token: string, id: string) {
-    return apiRequest<{ customer: Customer }>(`/customers/${id}`, { method: "DELETE", token });
+    void token;
+    return deleteCustomerLocal(id).then(async () => ({ customer: (await listCustomersLocal()).find((customer) => customer.id === id)! }));
   },
   listOrders(token: string, search = "", branchId?: string | null) {
-    const params = new URLSearchParams();
-    if (search.trim()) params.set("search", search.trim());
-    if (branchId) params.set("branchId", branchId);
-    return apiRequest<{ orders: Order[] }>(`/orders${params.toString() ? `?${params.toString()}` : ""}`, { token });
+    void token;
+    void branchId;
+    return listOrdersLocal(search).then((orders) => ({ orders }));
   },
   createOrder(
     token: string,
@@ -247,44 +288,50 @@ export const api = {
       notes?: string;
     }
   ) {
-    return apiRequest<{ order: Order }>("/orders", {
-      method: "POST",
-      token,
-      body: JSON.stringify(payload)
-    });
+    void token;
+    return createOrderLocal(payload).then((order) => ({ order }));
   },
   getOrder(token: string, id: string) {
-    return apiRequest<{
-      order: Order & { items: Array<{ id: string; quantity: number; unitPrice: number; lineTotal: number; product: Product }>; payments: Payment[] };
-      summary: { paid: number; balance: number };
-    }>(`/orders/${id}`, { token });
+    void token;
+    return getOrderDetailsLocal(id);
   },
   getReceipt(token: string, id: string) {
-    return apiRequest<{ receipt: ReceiptData }>(`/orders/${id}/receipt`, { token });
+    void token;
+    return getReceiptLocal(id).then((receipt) => ({ receipt }));
   },
   confirmOrder(token: string, id: string) {
-    return apiRequest<{ order: Order }>(`/orders/${id}/confirm`, { method: "POST", token });
+    void token;
+    return confirmOrderLocal(id).then((order) => ({ order }));
   },
   cancelOrder(token: string, id: string) {
-    return apiRequest<{ order: Order }>(`/orders/${id}/cancel`, { method: "POST", token });
+    void token;
+    return cancelOrderLocal(id).then((order) => ({ order }));
   },
   getOrderShareText(token: string, id: string) {
-    return apiRequest<{ message: string }>(`/orders/${id}/share-text`, { token });
+    void token;
+    return buildWhatsappOrderTextLocal(id).then((result) => ({ message: result.message }));
   },
   listPayments(token: string) {
-    return apiRequest<{ payments: Payment[] }>("/payments", { token });
+    void token;
+    return listPaymentsLocal().then((payments) => ({ payments }));
   },
   createPayment(token: string, payload: { orderId: string; amount: number; method: string; reference?: string; paidAt?: string }) {
-    return apiRequest<{ payment: Payment }>("/payments", {
-      method: "POST",
-      token,
-      body: JSON.stringify(payload)
-    });
+    void token;
+    return addPaymentLocal({
+      orderId: payload.orderId,
+      amount: Number(payload.amount),
+      method: payload.method as Payment["method"],
+      reference: payload.reference,
+      paidAt: payload.paidAt
+    }).then((payment) => ({ payment }));
   },
   initiatePaynow(
     token: string,
     payload: { orderId: string; amount: number; method: "ecocash" | "onemoney" | "web" | "card" | "other"; phone?: string }
   ) {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      throw new ApiError(0, onlinePaymentsMessage());
+    }
     return apiRequest<{ transactionId: string; pollUrl: string; redirectUrl?: string; instructions: string }>("/payments/paynow/initiate", {
       method: "POST",
       token,
@@ -292,26 +339,35 @@ export const api = {
     });
   },
   checkPaynowStatus(token: string, transactionId: string) {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      throw new ApiError(0, onlinePaymentsMessage());
+    }
     return apiRequest<{ status: string; message: string }>("/payments/paynow/status", {
       method: "POST",
       token,
       body: JSON.stringify({ transactionId })
+    }).then(async (result) => {
+      const merchantId = getAuthSnapshot()?.merchant?.id;
+      if (merchantId && result.status === "PAID") {
+        await syncOfflineCore(token, merchantId);
+      }
+      return result;
     });
   },
   listMovements(token: string, branchId?: string | null) {
-    const params = new URLSearchParams();
-    if (branchId) params.set("branchId", branchId);
-    return apiRequest<{ movements: StockMovement[] }>(`/inventory/movements${params.toString() ? `?${params.toString()}` : ""}`, { token });
+    void token;
+    void branchId;
+    return listStockMovementsLocal().then((movements) => ({ movements }));
   },
   getLowStock(token: string, branchId?: string | null) {
-    const params = new URLSearchParams();
-    if (branchId) params.set("branchId", branchId);
-    return apiRequest<{ products: Product[]; lowStockCount: number }>(`/inventory/low-stock${params.toString() ? `?${params.toString()}` : ""}`, { token });
+    void token;
+    void branchId;
+    return getLowStockLocal();
   },
   getReports(token: string, branchId?: string | null) {
-    const params = new URLSearchParams();
-    if (branchId) params.set("branchId", branchId);
-    return apiRequest<ReportsSummary>(`/reports/summary${params.toString() ? `?${params.toString()}` : ""}`, { token });
+    void token;
+    void branchId;
+    return getReportsLocal();
   },
   listTransfers(token: string) {
     return apiRequest<{ transfers: StockTransfer[] }>("/transfers", { token });

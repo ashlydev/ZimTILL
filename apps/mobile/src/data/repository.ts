@@ -38,6 +38,17 @@ type AddPaymentInput = {
   paynowTransactionId?: string | null;
 };
 
+type InventoryAdjustmentReason = "RETURN" | "EXPIRED" | "DAMAGED";
+
+type RecordInventoryAdjustmentInput = {
+  productId: string;
+  quantity: number;
+  reason: InventoryAdjustmentReason;
+  notes?: string | null;
+  orderId?: string | null;
+  occurredAt?: string;
+};
+
 type SessionContext = {
   merchantId: string;
   deviceId: string;
@@ -77,6 +88,18 @@ function normalizeOrderStatus(status: string): string {
     return status;
   }
   return "DRAFT";
+}
+
+function formatAdjustmentReason(reason: InventoryAdjustmentReason, notes?: string | null) {
+  return notes?.trim() ? `${reason}: ${notes.trim()}` : reason;
+}
+
+function parseAdjustmentReason(reason: string | null | undefined): InventoryAdjustmentReason | null {
+  if (!reason) return null;
+  if (reason.startsWith("RETURN")) return "RETURN";
+  if (reason.startsWith("EXPIRED")) return "EXPIRED";
+  if (reason.startsWith("DAMAGED")) return "DAMAGED";
+  return null;
 }
 
 async function enqueue(
@@ -320,6 +343,66 @@ export async function adjustStock(
   }
 
   await enqueue("product", productId, "UPSERT", updated);
+}
+
+export async function recordInventoryAdjustment(
+  context: SessionContext,
+  input: RecordInventoryAdjustmentInput
+): Promise<Record<string, unknown>> {
+  const product = await getProductById(context.merchantId, input.productId);
+  if (!product) {
+    throw new Error("Product not found");
+  }
+
+  const absoluteQty = Math.abs(Number(input.quantity));
+  const signedQuantity = input.reason === "RETURN" ? absoluteQty : -absoluteQty;
+  const nextType = input.reason === "RETURN" ? "IN" : "OUT";
+
+  const updated = await saveProduct(context, {
+    id: String(product.id),
+    name: String(product.name),
+    price: Number(product.price),
+    cost: product.cost === null ? null : Number(product.cost),
+    sku: product.sku ? String(product.sku) : null,
+    stockQty: Number(product.stockQty) + signedQuantity,
+    lowStockThreshold: Number(product.lowStockThreshold)
+  });
+
+  const db = await getDb();
+  const movementId = generateId();
+  const createdAt = input.occurredAt ?? nowIso();
+
+  await db.runAsync(
+    `INSERT INTO stock_movements (
+      id, merchant_id, product_id, type, quantity, reason, order_id,
+      created_at, updated_at, deleted_at, version, last_modified_by_device_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?);`,
+    [
+      movementId,
+      context.merchantId,
+      input.productId,
+      nextType,
+      signedQuantity,
+      formatAdjustmentReason(input.reason, input.notes),
+      input.orderId ?? null,
+      createdAt,
+      createdAt,
+      context.deviceId
+    ]
+  );
+
+  const movement = await db.getFirstAsync<Record<string, unknown>>(
+    "SELECT * FROM stock_movements WHERE id = ?;",
+    [movementId]
+  );
+
+  if (!movement) {
+    throw new Error("Failed to record inventory adjustment");
+  }
+
+  await enqueue("stockMovement", movementId, "UPSERT", toCamel(movement));
+  await enqueue("product", input.productId, "UPSERT", updated);
+  return toCamel(movement);
 }
 
 async function getCustomerById(merchantId: string, id: string): Promise<Record<string, unknown> | null> {
@@ -847,6 +930,14 @@ export async function getReports(merchantId: string): Promise<{
   salesBasis: string;
   today: { salesTotal: number; ordersCount: number };
   last7Days: { salesTotal: number; ordersCount: number; topProducts: Array<{ productId: string; name: string; qty: number }> };
+  returnsExpired: {
+    returnsCount: number;
+    returnsValue: number;
+    expiredCount: number;
+    expiredValue: number;
+    damagedCount: number;
+    damagedValue: number;
+  };
 }> {
   const db = await getDb();
   const today = new Date();
@@ -854,7 +945,7 @@ export async function getReports(merchantId: string): Promise<{
   const sevenDaysAgo = new Date(today);
   sevenDaysAgo.setDate(today.getDate() - 6);
 
-  const [todaySales, weekSales, todayOrders, weekOrders, topRows] = await Promise.all([
+  const [todaySales, weekSales, todayOrders, weekOrders, topRows, movementRows] = await Promise.all([
     db.getFirstAsync<{ total: number }>(
       `SELECT COALESCE(SUM(amount), 0) as total FROM payments
        WHERE merchant_id = ? AND deleted_at IS NULL AND status = 'CONFIRMED' AND paid_at >= ?;`,
@@ -880,12 +971,50 @@ export async function getReports(merchantId: string): Promise<{
        FROM order_items oi
        JOIN products p ON p.id = oi.product_id
        WHERE oi.merchant_id = ? AND oi.deleted_at IS NULL AND oi.created_at >= ?
-       GROUP BY oi.product_id, p.name
-       ORDER BY qty DESC
-       LIMIT 5;`,
+      GROUP BY oi.product_id, p.name
+      ORDER BY qty DESC
+      LIMIT 5;`,
+      [merchantId, sevenDaysAgo.toISOString()]
+    ),
+    db.getAllAsync<{ quantity: number; reason: string | null; price: number | null; created_at: string }>(
+      `SELECT sm.quantity, sm.reason, p.price, sm.created_at
+       FROM stock_movements sm
+       JOIN products p ON p.id = sm.product_id
+       WHERE sm.merchant_id = ? AND sm.deleted_at IS NULL AND sm.created_at >= ?;`,
       [merchantId, sevenDaysAgo.toISOString()]
     )
   ]);
+
+  const returnsExpired = {
+    returnsCount: 0,
+    returnsValue: 0,
+    expiredCount: 0,
+    expiredValue: 0,
+    damagedCount: 0,
+    damagedValue: 0
+  };
+
+  for (const row of movementRows) {
+    const type = parseAdjustmentReason(row.reason);
+    if (!type) continue;
+    const quantity = Math.abs(Number(row.quantity));
+    const value = quantity * Number(row.price ?? 0);
+
+    if (type === "RETURN") {
+      returnsExpired.returnsCount += quantity;
+      returnsExpired.returnsValue += value;
+      continue;
+    }
+
+    if (type === "EXPIRED") {
+      returnsExpired.expiredCount += quantity;
+      returnsExpired.expiredValue += value;
+      continue;
+    }
+
+    returnsExpired.damagedCount += quantity;
+    returnsExpired.damagedValue += value;
+  }
 
   return {
     salesBasis: "CONFIRMED_PAYMENTS",
@@ -901,7 +1030,8 @@ export async function getReports(merchantId: string): Promise<{
         name: row.product_name,
         qty: Number(row.qty)
       }))
-    }
+    },
+    returnsExpired
   };
 }
 

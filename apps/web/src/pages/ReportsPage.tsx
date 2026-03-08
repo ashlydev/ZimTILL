@@ -112,6 +112,25 @@ export function ReportsPage() {
             <StatCard label="Top Product Units" value={topUnits} />
           </div>
 
+          {report.returnsExpired ? (
+            <Card subtitle="Last 7 days from offline-ready stock movements" title="Returns / Expired Summary">
+              <div className="summary-inline">
+                <p>
+                  <span>Returns</span>
+                  <strong>{report.returnsExpired.returnsCount}</strong>
+                </p>
+                <p>
+                  <span>Expired</span>
+                  <strong>{report.returnsExpired.expiredCount}</strong>
+                </p>
+                <p>
+                  <span>Damaged</span>
+                  <strong>{report.returnsExpired.damagedCount}</strong>
+                </p>
+              </div>
+            </Card>
+          ) : null}
+
           <Card subtitle={period === "today" ? "Top sellers in the recent sales window" : "Top sellers over the last 7 days"} title="Top Products">
             {active.topProducts.length === 0 ? (
               <EmptyState description="No product movement for the selected period." title="No top products yet" />

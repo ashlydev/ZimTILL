@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
+import { onlinePaymentsMessage } from "../lib/offlineCore";
 import { formatDateTime, formatMoney, formatOrderStatus, toStatusClass } from "../lib/format";
 import type { Order, Payment, Product } from "../types";
 import { getButtonClassName, Button } from "../components/ui/Button";
@@ -75,7 +76,7 @@ function paynowBadgeClass(status: string): string {
 
 export function OrderDetailsPage() {
   const { id = "" } = useParams();
-  const { token } = useAuth();
+  const { token, isOnline } = useAuth();
 
   const [order, setOrder] = useState<OrderDetails | null>(null);
   const [paid, setPaid] = useState(0);
@@ -97,6 +98,13 @@ export function OrderDetailsPage() {
     setError("");
     try {
       const result = await api.getOrder(token, id);
+      if (!result) {
+        setOrder(null);
+        setPaid(0);
+        setBalance(0);
+        setError("Order not found");
+        return;
+      }
       setOrder(result.order);
       setPaid(Number(result.summary.paid));
       setBalance(Number(result.summary.balance));
@@ -304,6 +312,7 @@ export function OrderDetailsPage() {
       </Card>
 
       <Card subtitle="Paynow checkout with clear status tracking" title="Pay with Paynow">
+        {!isOnline ? <p className="status-text warning">{onlinePaymentsMessage()}</p> : null}
         <div className="form-grid">
           <Input
             label="Amount"
@@ -325,10 +334,10 @@ export function OrderDetailsPage() {
         </div>
 
         <div className="actions-row wrap">
-          <Button disabled={busy} onClick={() => void onInitiatePaynow()} variant="primary">
+          <Button disabled={busy || !isOnline} onClick={() => void onInitiatePaynow()} variant="primary">
             Initiate Paynow
           </Button>
-          <Button disabled={busy || !paynowTransactionId} onClick={() => void onCheckPaynowStatus()} variant="secondary">
+          <Button disabled={busy || !paynowTransactionId || !isOnline} onClick={() => void onCheckPaynowStatus()} variant="secondary">
             Check Status
           </Button>
         </div>

@@ -157,6 +157,12 @@ textarea {
   gap: var(--space-1);
 }
 
+.topbar-sync-status {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
 .app-content {
   flex: 1;
   padding: var(--space-2) var(--space-3) var(--space-3);
@@ -233,8 +239,17 @@ textarea {
   color: #b91c1c;
 }
 
+.status-text.warning {
+  color: #9a6700;
+}
+
 .status-text.success {
   color: var(--success-700);
+}
+
+.status-text.compact {
+  margin: 0;
+  font-size: 0.8rem;
 }
 
 .ui-button {

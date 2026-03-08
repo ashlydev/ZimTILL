@@ -8,11 +8,13 @@ import { AppInput } from "../../components/AppInput";
 import { AppButton } from "../../components/AppButton";
 import { colors, spacing } from "../../constants/theme";
 import { useAuth } from "../../contexts/AuthContext";
+import { useAppContext } from "../../contexts/AppContext";
 
 type Props = NativeStackScreenProps<AuthStackParamList, "Login">;
 
 export function LoginScreen({ navigation }: Props) {
   const { login } = useAuth();
+  const { isOnline } = useAppContext();
   const [identifier, setIdentifier] = useState("");
   const [pin, setPin] = useState("");
   const [loading, setLoading] = useState(false);
@@ -41,6 +43,15 @@ export function LoginScreen({ navigation }: Props) {
       </View>
 
       <Card>
+        <View style={[styles.statusNote, !isOnline ? styles.statusOffline : styles.statusOnline]}>
+          <Text style={styles.statusTitle}>{isOnline ? "Online" : "Offline mode"}</Text>
+          <Text style={styles.statusBody}>
+            {isOnline
+              ? "Sign in once on this device and later you can keep working offline."
+              : "Use an account that has already signed in on this device. Online payments still need internet."}
+          </Text>
+        </View>
+
         <AppInput label="Phone or Email" value={identifier} onChangeText={setIdentifier} autoCapitalize="none" />
         <AppInput
           label="PIN"
@@ -88,5 +99,31 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textDecorationLine: "underline",
     marginTop: spacing.sm
+  },
+  statusNote: {
+    borderRadius: 14,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: 4
+  },
+  statusOnline: {
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE"
+  },
+  statusOffline: {
+    backgroundColor: "#F3F4F6",
+    borderWidth: 1,
+    borderColor: colors.border
+  },
+  statusTitle: {
+    color: colors.dark,
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  statusBody: {
+    color: colors.slate,
+    fontSize: 13,
+    lineHeight: 18
   }
 });

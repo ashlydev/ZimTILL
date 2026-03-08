@@ -16,55 +16,79 @@ type Method = "ecocash" | "onemoney" | "web" | "card" | "other";
 
 export function PaynowCheckoutScreen({ route }: Props) {
   const { session } = useAuth();
-  const { triggerSync } = useAppContext();
+  const { triggerSync, isOnline } = useAppContext();
   const [amount, setAmount] = useState(String(route.params.amount > 0 ? route.params.amount : 0));
   const [method, setMethod] = useState<Method>("ecocash");
   const [phone, setPhone] = useState("");
   const [transactionId, setTransactionId] = useState<string | null>(null);
   const [pollUrl, setPollUrl] = useState<string | null>(null);
   const [instructions, setInstructions] = useState<string>("");
+  const [initiating, setInitiating] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(false);
 
   const initiate = async () => {
     if (!session) return;
-
-    const response = await apiRequest<{ transactionId: string; pollUrl: string; redirectUrl?: string; instructions: string }>(
-      "/payments/paynow/initiate",
-      {
-        method: "POST",
-        token: session.token,
-        body: {
-          orderId: route.params.orderId,
-          amount: Number(amount || 0),
-          method,
-          phone: phone || undefined
-        }
-      }
-    );
-
-    setTransactionId(response.transactionId);
-    setPollUrl(response.pollUrl);
-    setInstructions(response.instructions);
-
-    if (response.redirectUrl) {
-      await Linking.openURL(response.redirectUrl);
+    if (!isOnline) {
+      Alert.alert("Internet required", "Paynow and EcoCash checkout only work when the device is online.");
+      return;
     }
 
-    Alert.alert("Paynow started", "Follow the payment prompt, then check status.");
+    setInitiating(true);
+    try {
+      const response = await apiRequest<{ transactionId: string; pollUrl: string; redirectUrl?: string; instructions: string }>(
+        "/payments/paynow/initiate",
+        {
+          method: "POST",
+          token: session.token,
+          body: {
+            orderId: route.params.orderId,
+            amount: Number(amount || 0),
+            method,
+            phone: phone || undefined
+          }
+        }
+      );
+
+      setTransactionId(response.transactionId);
+      setPollUrl(response.pollUrl);
+      setInstructions(response.instructions);
+
+      if (response.redirectUrl) {
+        await Linking.openURL(response.redirectUrl);
+      }
+
+      Alert.alert("Paynow started", "Follow the payment prompt, then check status.");
+    } catch (error) {
+      Alert.alert("Payment failed", error instanceof Error ? error.message : "Unable to start Paynow.");
+    } finally {
+      setInitiating(false);
+    }
   };
 
   const checkStatus = async () => {
     if (!session || !transactionId) return;
+    if (!isOnline) {
+      Alert.alert("Internet required", "Reconnect to check Paynow payment status.");
+      return;
+    }
 
-    const response = await apiRequest<{ status: string }>("/payments/paynow/status", {
-      method: "POST",
-      token: session.token,
-      body: { transactionId }
-    });
+    setCheckingStatus(true);
+    try {
+      const response = await apiRequest<{ status: string }>("/payments/paynow/status", {
+        method: "POST",
+        token: session.token,
+        body: { transactionId }
+      });
 
-    Alert.alert("Payment status", response.status);
+      Alert.alert("Payment status", response.status);
 
-    if (response.status === "PAID") {
-      await triggerSync();
+      if (response.status === "PAID") {
+        await triggerSync();
+      }
+    } catch (error) {
+      Alert.alert("Status check failed", error instanceof Error ? error.message : "Unable to check payment status.");
+    } finally {
+      setCheckingStatus(false);
     }
   };
 
@@ -76,6 +100,10 @@ export function PaynowCheckoutScreen({ route }: Props) {
       </View>
 
       <Card>
+        {!isOnline ? (
+          <Text style={styles.offlineNotice}>This screen needs internet. Orders and stock stay offline-first, but Paynow runs online only.</Text>
+        ) : null}
+
         <Text style={styles.sectionTitle}>Amount</Text>
         <TextInput
           style={styles.textInput}
@@ -109,7 +137,7 @@ export function PaynowCheckoutScreen({ route }: Props) {
           />
         ) : null}
 
-        <AppButton label="Initiate payment" onPress={initiate} />
+        <AppButton label="Initiate payment" onPress={initiate} loading={initiating} disabled={!isOnline} />
       </Card>
 
       {transactionId ? (
@@ -118,7 +146,13 @@ export function PaynowCheckoutScreen({ route }: Props) {
           <Text style={styles.meta}>ID: {transactionId}</Text>
           {pollUrl ? <Text style={styles.meta}>Poll URL ready</Text> : null}
           {instructions ? <Text style={styles.meta}>{instructions}</Text> : null}
-          <AppButton label="Check payment status" variant="secondary" onPress={checkStatus} />
+          <AppButton
+            label="Check payment status"
+            variant="secondary"
+            onPress={checkStatus}
+            loading={checkingStatus}
+            disabled={!isOnline}
+          />
         </Card>
       ) : null}
     </Screen>
@@ -151,6 +185,11 @@ const styles = StyleSheet.create({
   meta: {
     color: colors.slate,
     fontSize: 13
+  },
+  offlineNotice: {
+    color: colors.slate,
+    fontSize: 13,
+    lineHeight: 18
   },
   row: {
     flexDirection: "row",

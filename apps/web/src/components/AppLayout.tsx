@@ -58,7 +58,7 @@ function getRouteTitle(pathname: string): string {
 }
 
 export function AppLayout() {
-  const { merchant, user, branches, activeBranchId, switchBranch, hasFeature, logout } = useAuth();
+  const { merchant, user, branches, activeBranchId, switchBranch, hasFeature, logout, syncing, syncNow, lastSyncAt, syncError, isOnline } = useAuth();
   const location = useLocation();
 
   const visibleSidebarItems = navItems.filter((item) => {
@@ -127,6 +127,18 @@ export function AppLayout() {
               </label>
             ) : null}
             <OfflineBadge />
+            <div className="topbar-sync-status">
+              <button
+                className={getButtonClassName("secondary", "sm")}
+                disabled={!isOnline || syncing}
+                onClick={() => void syncNow()}
+                type="button"
+              >
+                {syncing ? "Syncing..." : "Sync Now"}
+              </button>
+              <p className="subtle-text">{lastSyncAt ? `Last sync ${new Date(lastSyncAt).toLocaleString()}` : "Not synced yet"}</p>
+              {syncError ? <p className="status-text error compact">{syncError}</p> : null}
+            </div>
             <button className={getButtonClassName("ghost", "sm")} onClick={() => void logout()} type="button">
               Logout
             </button>

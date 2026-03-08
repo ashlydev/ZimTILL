@@ -51,6 +51,13 @@ export function ReportsScreen() {
       </Card>
 
       <Card>
+        <Text style={styles.sectionTitle}>Returns / Expired</Text>
+        <Text style={styles.meta}>Returns: {data.returnsExpired.returnsCount}</Text>
+        <Text style={styles.meta}>Expired: {data.returnsExpired.expiredCount}</Text>
+        <Text style={styles.meta}>Damaged: {data.returnsExpired.damagedCount}</Text>
+      </Card>
+
+      <Card>
         <Text style={styles.sectionTitle}>Top Products</Text>
         {data.last7Days.topProducts.length === 0 ? <Text style={styles.meta}>No sales yet.</Text> : null}
         {data.last7Days.topProducts.map((item) => (
