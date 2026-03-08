@@ -1,7 +1,8 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { InstallAppButton } from "../components/InstallAppButton";
-import { Button } from "../components/ui/Button";
+import { Button, getButtonClassName } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Input, Select, TextArea } from "../components/ui/FormControls";
 import { PageHeader } from "../components/ui/PageHeader";
@@ -30,7 +31,7 @@ function downloadJson(filename: string, data: unknown) {
 }
 
 export function SettingsPage() {
-  const { token, user, hasAnyRole } = useAuth();
+  const { token, user, hasAnyRole, subscription } = useAuth();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [staff, setStaff] = useState<StaffUser[]>([]);
   const [devices, setDevices] = useState<DeviceSession[]>([]);
@@ -46,6 +47,7 @@ export function SettingsPage() {
   const canViewStaff = hasAnyRole(["OWNER", "ADMIN", "MANAGER"]);
   const canManageDevices = hasAnyRole(["OWNER", "ADMIN", "MANAGER"]);
   const canManageBackup = hasAnyRole(["OWNER", "ADMIN", "MANAGER"]);
+  const canViewPricing = hasAnyRole(["OWNER", "ADMIN", "MANAGER"]);
 
   const refreshSettings = async () => {
     if (!token) return;
@@ -250,6 +252,29 @@ export function SettingsPage() {
       />
 
       {error ? <p className="status-text error">{error}</p> : null}
+
+      {canViewPricing ? (
+        <Card
+          action={
+            <Link className={getButtonClassName("primary")} to="/pricing">
+              Open Pricing
+            </Link>
+          }
+          subtitle="Plan details, usage limits, and upgrade requests."
+          title="Subscription & Pricing"
+        >
+          <div className="summary-inline">
+            <p>
+              <span>Current Plan</span>
+              <strong>{subscription?.plan?.name ?? "Starter"}</strong>
+            </p>
+            <p>
+              <span>Status</span>
+              <strong>{subscription?.status ?? "TRIALING"}</strong>
+            </p>
+          </div>
+        </Card>
+      ) : null}
 
       {!settings ? (
         <Card>
