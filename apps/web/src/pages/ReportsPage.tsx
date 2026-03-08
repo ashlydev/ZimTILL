@@ -31,7 +31,7 @@ const topProductColumns: Array<TableColumn<TopProduct>> = [
 ];
 
 export function ReportsPage() {
-  const { token } = useAuth();
+  const { token, activeBranchId } = useAuth();
   const [report, setReport] = useState<ReportsSummary | null>(null);
   const [period, setPeriod] = useState<ReportPeriod>("last7Days");
   const [error, setError] = useState("");
@@ -41,7 +41,7 @@ export function ReportsPage() {
     setError("");
 
     try {
-      const result = await loadWithCache("reports:summary", () => api.getReports(token));
+      const result = await loadWithCache(`reports:summary:${activeBranchId ?? "all"}`, () => api.getReports(token, activeBranchId));
       setReport(result.value);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load reports");
@@ -50,7 +50,7 @@ export function ReportsPage() {
 
   useEffect(() => {
     void refresh();
-  }, [token]);
+  }, [token, activeBranchId]);
 
   const active = useMemo(() => {
     if (!report) return null;

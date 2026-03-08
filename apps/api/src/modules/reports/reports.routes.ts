@@ -61,7 +61,7 @@ reportsRouter.get(
       prisma.orderItem.findMany({
         where: {
           merchantId,
-          ...(branchId ? { branchId } : {}),
+          ...(branchId ? { order: { branchId } } : {}),
           deletedAt: null,
           createdAt: { gte: sevenDaysAgo }
         },

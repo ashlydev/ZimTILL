@@ -19,6 +19,21 @@ type DashboardData = {
   lowStockCount: number;
 };
 
+function emptyReport(): ReportsSummary {
+  return {
+    salesBasis: "CONFIRMED_PAYMENTS",
+    today: {
+      salesTotal: 0,
+      ordersCount: 0
+    },
+    last7Days: {
+      salesTotal: 0,
+      ordersCount: 0,
+      topProducts: []
+    }
+  };
+}
+
 const recentOrderColumns: Array<TableColumn<Order>> = [
   {
     key: "order",
@@ -48,7 +63,7 @@ const recentOrderColumns: Array<TableColumn<Order>> = [
 ];
 
 export function DashboardPage() {
-  const { token } = useAuth();
+  const { token, activeBranchId } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
   const [cachedAt, setCachedAt] = useState<string | undefined>();
   const [error, setError] = useState("");
@@ -58,13 +73,26 @@ export function DashboardPage() {
     setError("");
 
     try {
-      const result = await loadWithCache("dashboard", async () => {
-        const [report, ordersRes, lowStockRes] = await Promise.all([api.getReports(token), api.listOrders(token), api.getLowStock(token)]);
+      const cacheKey = `dashboard:${activeBranchId ?? "all"}`;
+      const result = await loadWithCache(cacheKey, async () => {
+        const [reportResult, ordersResult, lowStockResult] = await Promise.allSettled([
+          api.getReports(token, activeBranchId),
+          api.listOrders(token, "", activeBranchId),
+          api.getLowStock(token, activeBranchId)
+        ]);
+
+        const report = reportResult.status === "fulfilled" ? reportResult.value : emptyReport();
+        const orders = ordersResult.status === "fulfilled" ? ordersResult.value.orders : [];
+        const lowStockCount = lowStockResult.status === "fulfilled" ? lowStockResult.value.lowStockCount : 0;
+
+        if (reportResult.status === "rejected" && ordersResult.status === "rejected" && lowStockResult.status === "rejected") {
+          throw reportResult.reason;
+        }
 
         return {
           report,
-          orders: ordersRes.orders,
-          lowStockCount: lowStockRes.lowStockCount
+          orders,
+          lowStockCount
         };
       });
 
@@ -77,7 +105,7 @@ export function DashboardPage() {
 
   useEffect(() => {
     void refresh();
-  }, [token]);
+  }, [token, activeBranchId]);
 
   const outstanding = useMemo(() => {
     if (!data) return 0;
