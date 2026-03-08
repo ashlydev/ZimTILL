@@ -29,11 +29,11 @@ export function InstallAppButton() {
   };
 
   if (!deferredPrompt && installStatus === "idle") {
-    return <p className="subtle-text">Open Chrome menu and tap Install app when available.</p>;
+    return <p className="subtle-text">Open your browser menu and tap Install app to add ZimTILL.</p>;
   }
 
   if (installStatus === "accepted") {
-    return <p className="status-text success">Installed. Open from your home screen.</p>;
+    return <p className="status-text success">ZimTILL is installed. Open it from your home screen.</p>;
   }
 
   if (installStatus === "dismissed") {
@@ -42,7 +42,7 @@ export function InstallAppButton() {
 
   return (
     <Button onClick={() => void onInstall()} variant="primary">
-      Install App
+      Install ZimTILL
     </Button>
   );
 }

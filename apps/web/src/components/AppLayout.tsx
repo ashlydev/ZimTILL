@@ -54,7 +54,7 @@ function getRouteTitle(pathname: string): string {
   if (pathname.startsWith("/pricing")) return "Pricing";
   if (pathname.startsWith("/admin")) return "Platform Admin";
   if (pathname.startsWith("/settings")) return "Settings";
-  return "Novoriq Orders";
+  return "ZimTILL";
 }
 
 export function AppLayout() {
@@ -85,7 +85,7 @@ export function AppLayout() {
     <div className="app-shell">
       <aside className="app-sidebar" aria-label="Primary">
         <div className="sidebar-brand">
-          <p className="sidebar-kicker">Novoriq Orders V3</p>
+          <p className="sidebar-kicker">ZimTILL</p>
           <h1>{merchant?.name ?? "Merchant"}</h1>
         </div>
 

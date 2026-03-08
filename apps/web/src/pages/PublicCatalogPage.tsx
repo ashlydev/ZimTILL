@@ -79,7 +79,7 @@ export function PublicCatalogPage() {
   return (
     <div className="catalog-shell">
       <section className="catalog-hero">
-        <p className="sidebar-kicker">Novoriq Catalog</p>
+        <p className="sidebar-kicker">ZimTILL Catalog</p>
         <h1>{payload?.settings.headline || payload?.merchant?.name || "Online Catalog"}</h1>
         <p>{payload?.settings.description || "Browse products and pay online with EcoCash."}</p>
       </section>

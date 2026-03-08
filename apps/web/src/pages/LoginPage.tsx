@@ -1,12 +1,14 @@
 import { FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Button } from "../components/ui/Button";
+import { InstallAppButton } from "../components/InstallAppButton";
+import { Button, getButtonClassName } from "../components/ui/Button";
 import { Input } from "../components/ui/FormControls";
 import { getUserError, useAuth } from "../context/AuthContext";
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
+  const downloadUrl = typeof window === "undefined" ? "https://novoriq-orders-pwa.netlify.app" : window.location.origin;
 
   const [identifier, setIdentifier] = useState("");
   const [pin, setPin] = useState("");
@@ -31,6 +33,7 @@ export function LoginPage() {
     <div className="auth-page">
       <form className="auth-card form-stack" onSubmit={onSubmit}>
         <div>
+          <p className="sidebar-kicker auth-brand">ZimTILL</p>
           <h1>Welcome Back</h1>
           <p className="subtle-text">Sign in with your phone or email and PIN.</p>
         </div>
@@ -60,6 +63,13 @@ export function LoginPage() {
         <Button disabled={busy} type="submit" variant="primary">
           {busy ? "Signing in..." : "Sign In"}
         </Button>
+
+        <div className="install-note form-stack">
+          <InstallAppButton />
+          <a className={getButtonClassName("secondary")} href={downloadUrl}>
+            Download ZimTILL
+          </a>
+        </div>
 
         <div className="auth-links">
           <Link to="/register">Create account</Link>

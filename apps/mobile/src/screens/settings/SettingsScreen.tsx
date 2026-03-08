@@ -76,7 +76,7 @@ export function SettingsScreen() {
     const text = JSON.stringify(backup, null, 2);
     setBackupJson(text);
     await Share.share({
-      title: "Novoriq Backup",
+      title: "ZimTILL Backup",
       message: text
     });
   };

@@ -207,7 +207,7 @@ export function SettingsPage() {
     setError("");
     try {
       const backup = await api.exportBackup(token);
-      downloadJson(`novoriq-backup-${new Date().toISOString().slice(0, 10)}.json`, backup);
+      downloadJson(`zimtill-backup-${new Date().toISOString().slice(0, 10)}.json`, backup);
     } catch (exportError) {
       setError(exportError instanceof Error ? exportError.message : "Failed to export backup");
     } finally {

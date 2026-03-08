@@ -14,9 +14,9 @@ export default defineConfig({
         "icons/apple-touch-icon.png"
       ],
       manifest: {
-        name: "Novoriq Orders",
-        short_name: "Novoriq",
-        description: "Offline-first orders, payments, and stock management for SMEs.",
+        name: "ZimTILL",
+        short_name: "ZimTILL",
+        description: "Offline-first orders, payments, stock, and catalog management for hardware shops and SMEs.",
         display: "standalone",
         start_url: "/",
         scope: "/",

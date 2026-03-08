@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Novoriq Orders",
-    "slug": "novoriq-orders",
+    "name": "ZimTILL",
+    "slug": "zimtill",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -19,10 +19,10 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.novoriq.orders"
+      "bundleIdentifier": "com.zimtill.app"
     },
     "android": {
-      "package": "com.novoriq.orders",
+      "package": "com.zimtill.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundImage": "./assets/adaptive-icon-background.png"

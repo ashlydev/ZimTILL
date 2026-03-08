@@ -36,8 +36,8 @@ export function LoginScreen({ navigation }: Props) {
   return (
     <Screen>
       <View style={styles.hero}>
-        <Text style={styles.title}>Novoriq Orders</Text>
-        <Text style={styles.subtitle}>Offline-first orders, payments and stock for Zimbabwean SMEs.</Text>
+        <Text style={styles.title}>ZimTILL</Text>
+        <Text style={styles.subtitle}>Offline-first orders, payments, and stock for Zimbabwean hardware shops and SMEs.</Text>
       </View>
 
       <Card>

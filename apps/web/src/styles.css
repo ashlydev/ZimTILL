@@ -21,6 +21,9 @@
 
 * {
   box-sizing: border-box;
+  transition: none !important;
+  animation: none !important;
+  scroll-behavior: auto !important;
 }
 
 html,
@@ -869,6 +872,10 @@ textarea.input-control {
   margin: 0;
   color: var(--navy-900);
   font-size: 1.35rem;
+}
+
+.auth-brand {
+  margin-bottom: var(--space-1);
 }
 
 .auth-links {
