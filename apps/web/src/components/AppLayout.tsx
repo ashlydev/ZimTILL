@@ -26,8 +26,7 @@ const navItems: NavItem[] = [
   { to: "/branches", label: "Branches", roles: ["OWNER", "ADMIN", "MANAGER"] },
   { to: "/catalog", label: "Catalog", roles: ["OWNER", "ADMIN", "MANAGER"] },
   { to: "/pricing", label: "Pricing", roles: ["OWNER", "ADMIN", "MANAGER"] },
-  { to: "/settings", label: "Settings", roles: ["OWNER", "ADMIN", "MANAGER"] },
-  { to: "/admin", label: "Platform Admin", roles: ["OWNER", "ADMIN"], requireFeature: "PLATFORM_ADMIN" }
+  { to: "/settings", label: "Settings", roles: ["OWNER", "ADMIN", "MANAGER"] }
 ];
 
 const mobileTabs: NavItem[] = [

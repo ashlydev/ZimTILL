@@ -1,6 +1,7 @@
 import type { Branch, FeatureFlag, Subscription } from "../types";
 
 const TOKEN_KEY = "novoriq_web_token";
+const PLATFORM_ADMIN_TOKEN_KEY = "novoriq_web_platform_admin_token";
 const DEVICE_KEY = "novoriq_web_device_id";
 const AUTH_SNAPSHOT_KEY = "novoriq_web_auth_snapshot";
 const SYNC_META_PREFIX = "novoriq_web_sync_meta:";
@@ -48,6 +49,22 @@ export function setToken(token: string): void {
 export function clearToken(): void {
   try {
     localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+export function getPlatformAdminToken(): string | null {
+  return safeGet(PLATFORM_ADMIN_TOKEN_KEY);
+}
+
+export function setPlatformAdminToken(token: string): void {
+  safeSet(PLATFORM_ADMIN_TOKEN_KEY, token);
+}
+
+export function clearPlatformAdminToken(): void {
+  try {
+    localStorage.removeItem(PLATFORM_ADMIN_TOKEN_KEY);
   } catch {
     // Ignore storage failures.
   }

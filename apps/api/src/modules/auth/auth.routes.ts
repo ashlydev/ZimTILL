@@ -3,14 +3,20 @@ import { z } from "zod";
 import { loginSchema, registerSchema } from "@novoriq/shared";
 import { prisma } from "../../lib/prisma";
 import { asyncHandler, HttpError } from "../../lib/http";
+import { getPlatformAdminEmail, verifyPlatformAdminCredentials } from "../../config/platform-admin";
 import { requireAuth } from "../../middleware/auth";
 import { validateBody } from "../../middleware/validate";
 import { login, logout, register } from "./auth.service";
 import { toPlain } from "../../lib/serialization";
+import { signToken } from "../../lib/token";
 
 const deviceIdSchema = z.string().trim().min(3).max(120);
 const logoutBodySchema = z.object({
   deviceId: deviceIdSchema.optional()
+});
+const platformAdminLoginSchema = z.object({
+  email: z.string().trim().email(),
+  password: z.string().min(1)
 });
 
 export const authRouter = Router();
@@ -31,6 +37,43 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     const result = await login(prisma, req.body);
     res.json(result);
+  })
+);
+
+authRouter.post(
+  "/platform-admin/login",
+  validateBody(platformAdminLoginSchema),
+  asyncHandler(async (req, res) => {
+    const { email, password } = req.body as z.infer<typeof platformAdminLoginSchema>;
+    const platformAdminEmail = getPlatformAdminEmail();
+    const matches = await verifyPlatformAdminCredentials(email, password);
+
+    if (!matches) {
+      throw new HttpError(401, "Invalid platform admin credentials");
+    }
+
+    const token = signToken({
+      userId: "platform-admin",
+      merchantId: "platform-admin",
+      role: "ADMIN",
+      identifier: platformAdminEmail,
+      deviceId: "platform-admin",
+      branchId: null,
+      platformAccess: true,
+      scope: "platform_admin",
+      email: platformAdminEmail
+    });
+
+    res.json({
+      token,
+      user: {
+        id: "platform-admin",
+        identifier: platformAdminEmail,
+        role: "ADMIN",
+        isActive: true,
+        isPlatformAdmin: true
+      }
+    });
   })
 );
 

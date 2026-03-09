@@ -312,7 +312,7 @@ export async function login(
     identifier: user.identifier,
     deviceId: args.deviceId,
     branchId: device.activeBranchId ?? null,
-    platformAccess: user.isPlatformAdmin || user.role === "OWNER"
+    platformAccess: false
   });
 
   return {

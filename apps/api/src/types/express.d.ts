@@ -1,9 +1,12 @@
-import type { AuthTokenPayload } from "../lib/token";
+import type { MerchantAuthTokenPayload } from "../lib/token";
 
 declare global {
   namespace Express {
     interface Request {
-      user?: AuthTokenPayload;
+      user?: MerchantAuthTokenPayload;
+      platformAdmin?: {
+        email: string;
+      };
     }
   }
 }

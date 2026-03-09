@@ -231,7 +231,7 @@ export function requirePlatformAccess(req: Request, res: Response, next: NextFun
     return;
   }
 
-  if (!req.user.platformAccess && req.user.role !== "OWNER") {
+  if (!req.user.platformAccess) {
     res.status(403).json({ message: "Forbidden: platform access required" });
     return;
   }

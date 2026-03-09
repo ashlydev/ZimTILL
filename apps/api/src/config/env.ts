@@ -20,6 +20,8 @@ const envSchema = z
     DATABASE_URL: optionalString(),
     JWT_SECRET: optionalString(),
     JWT_EXPIRES_IN: z.string().default("7d"),
+    PLATFORM_ADMIN_EMAIL: optionalString(),
+    PLATFORM_ADMIN_PASSWORD: optionalString(),
     CORS_ORIGIN: optionalString(),
     PAYNOW_INTEGRATION_ID: optionalString(),
     PAYNOW_INTEGRATION_KEY: optionalString(),

@@ -142,6 +142,11 @@ export type AuthResponse = {
   activeBranchId?: string | null;
 };
 
+export type PlatformAdminAuthResponse = {
+  token: string;
+  user: { id: string; identifier: string; role: Role; isActive?: boolean; isPlatformAdmin?: boolean };
+};
+
 export type MeResponse = {
   user: { id: string; identifier: string; role: Role; isActive?: boolean; isPlatformAdmin?: boolean };
   merchant: Merchant;
@@ -169,6 +174,12 @@ export const api = {
   },
   login(payload: LoginPayload) {
     return apiRequest<AuthResponse>("/auth/login", { method: "POST", body: JSON.stringify(payload) });
+  },
+  platformAdminLogin(payload: { email: string; password: string }) {
+    return apiRequest<PlatformAdminAuthResponse>("/auth/platform-admin/login", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
   },
   register(payload: RegisterPayload) {
     return apiRequest<AuthResponse>("/auth/register", { method: "POST", body: JSON.stringify(payload) });

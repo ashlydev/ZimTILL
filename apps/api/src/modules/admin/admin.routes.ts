@@ -3,12 +3,10 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncHandler, HttpError } from "../../lib/http";
-import { requireAuth } from "../../middleware/auth";
-import { requirePlatformAccess } from "../../middleware/permissions";
+import { requirePlatformAdmin } from "../../middleware/platform-admin";
 import { validateBody } from "../../middleware/validate";
 import { toPlain } from "../../lib/serialization";
 import { signToken } from "../../lib/token";
-import { recordAudit } from "../audit/audit.service";
 
 const disableUserSchema = z.object({
   userId: z.string().uuid(),
@@ -49,8 +47,38 @@ const setPlanSchema = z.object({
 });
 
 export const adminRouter = Router();
-adminRouter.use(requireAuth);
-adminRouter.use(requirePlatformAccess);
+adminRouter.use(requirePlatformAdmin);
+
+async function recordPlatformAdminAudit(
+  merchantId: string,
+  actorEmail: string,
+  input: {
+    action: string;
+    entityType: string;
+    entityId?: string | null;
+    metadata?: Record<string, unknown>;
+  }
+) {
+  try {
+    await prisma.auditLog.create({
+      data: {
+        merchantId,
+        branchId: null,
+        userId: null,
+        action: input.action,
+        entityType: input.entityType,
+        entityId: input.entityId ?? null,
+        metadata: {
+          ...(input.metadata ?? {}),
+          actor: "platform_admin",
+          actorEmail
+        }
+      }
+    });
+  } catch {
+    // Audit should not block support actions.
+  }
+}
 
 adminRouter.get(
   "/overview",
@@ -122,7 +150,7 @@ adminRouter.post(
       }
     });
 
-    await recordAudit(prisma, req.user!, {
+    await recordPlatformAdminAudit(merchantId, req.platformAdmin!.email, {
       action: isActive ? "admin.activateMerchant" : "admin.deactivateMerchant",
       entityType: "Merchant",
       entityId: merchantId,
@@ -183,7 +211,7 @@ adminRouter.post(
           include: { plan: true }
         });
 
-    await recordAudit(prisma, req.user!, {
+    await recordPlatformAdminAudit(merchantId, req.platformAdmin!.email, {
       action: "admin.extendTrial",
       entityType: "Subscription",
       entityId: subscription.id,
@@ -251,7 +279,7 @@ adminRouter.post(
       }
     });
 
-    await recordAudit(prisma, req.user!, {
+    await recordPlatformAdminAudit(merchantId, req.platformAdmin!.email, {
       action: "admin.setPlan",
       entityType: "Subscription",
       entityId: subscription.id,
@@ -300,7 +328,7 @@ adminRouter.post(
       }
     });
 
-    await recordAudit(prisma, req.user!, {
+    await recordPlatformAdminAudit(user.merchantId, req.platformAdmin!.email, {
       action: "admin.disableUser",
       entityType: "User",
       entityId: updated.id,
@@ -333,7 +361,7 @@ adminRouter.post(
       data: { pinHash, updatedAt: new Date() }
     });
 
-    await recordAudit(prisma, req.user!, {
+    await recordPlatformAdminAudit(user.merchantId, req.platformAdmin!.email, {
       action: "admin.resetPin",
       entityType: "User",
       entityId: user.id
@@ -375,10 +403,10 @@ adminRouter.post(
       identifier: user.identifier,
       deviceId: device?.deviceId ?? "admin-impersonation",
       branchId: device?.activeBranchId ?? user.defaultBranchId ?? null,
-      platformAccess: true
+      platformAccess: false
     });
 
-    await recordAudit(prisma, req.user!, {
+    await recordPlatformAdminAudit(merchantId, req.platformAdmin!.email, {
       action: "admin.impersonate",
       entityType: "Merchant",
       entityId: merchantId,

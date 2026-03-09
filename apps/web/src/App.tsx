@@ -23,6 +23,7 @@ import { PricingPage } from "./pages/PricingPage";
 import { AdminPage } from "./pages/AdminPage";
 import { PublicCatalogPage } from "./pages/PublicCatalogPage";
 import { SyncStatusPage } from "./pages/SyncStatusPage";
+import { AdminLoginPage } from "./pages/AdminLoginPage";
 
 function ProtectedRoutes() {
   const { token, loading } = useAuth();
@@ -65,11 +66,7 @@ export default function App() {
       />
       <Route
         path="/admin/login"
-        element={
-          <PublicOnlyRoutes>
-            <LoginPage />
-          </PublicOnlyRoutes>
-        }
+        element={<AdminLoginPage />}
       />
       <Route
         path="/register"
@@ -100,9 +97,10 @@ export default function App() {
         <Route path="/catalog" element={<CatalogPage />} />
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/sync-status" element={<SyncStatusPage />} />
-        <Route path="/admin" element={<AdminPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
+
+      <Route path="/admin" element={<AdminPage />} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

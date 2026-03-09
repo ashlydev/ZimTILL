@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useAuth } from "../context/AuthContext";
-import { api } from "../lib/api";
+import { useNavigate } from "react-router-dom";
+import { ApiError, api } from "../lib/api";
 import { formatDateTime } from "../lib/format";
+import { clearPlatformAdminToken, getPlatformAdminToken } from "../lib/storage";
 import type { FeatureFlag, Merchant, StaffUser, Subscription, UsageCounter } from "../types";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -19,7 +20,8 @@ type MerchantRow = Merchant & {
 const planOptions = ["STARTER", "PRO", "BUSINESS", "ENTERPRISE"] as const;
 
 export function AdminPage() {
-  const { token, hasAnyRole } = useAuth();
+  const navigate = useNavigate();
+  const [token, setToken] = useState<string | null>(() => getPlatformAdminToken());
   const [overview, setOverview] = useState<{ totals: { merchants: number; openUpgradeRequests: number }; subscriptions: Subscription[] } | null>(null);
   const [merchants, setMerchants] = useState<MerchantRow[]>([]);
   const [flags, setFlags] = useState<FeatureFlag[]>([]);
@@ -35,25 +37,48 @@ export function AdminPage() {
   const [impersonateMerchantId, setImpersonateMerchantId] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const exitToAdminLogin = () => {
+    clearPlatformAdminToken();
+    setToken(null);
+    navigate("/admin/login", { replace: true });
+  };
+
+  const handleAdminError = (error: unknown): string => {
+    if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+      exitToAdminLogin();
+      return "Platform admin session expired. Sign in again.";
+    }
+
+    return error instanceof Error ? error.message : "Admin action failed";
+  };
+
   const refresh = async () => {
     if (!token) return;
-    const [overviewRes, merchantsRes, flagsRes] = await Promise.all([
-      api.getAdminOverview(token),
-      api.listAdminMerchants(token),
-      api.listAdminFeatureFlags(token)
-    ]);
-    setOverview(overviewRes);
-    setMerchants(merchantsRes.merchants);
-    setFlags(flagsRes.flags);
-    if (!selectedMerchantId && merchantsRes.merchants[0]?.id) {
-      setSelectedMerchantId(merchantsRes.merchants[0].id);
-      setImpersonateMerchantId(merchantsRes.merchants[0].id);
+    try {
+      const [overviewRes, merchantsRes, flagsRes] = await Promise.all([
+        api.getAdminOverview(token),
+        api.listAdminMerchants(token),
+        api.listAdminFeatureFlags(token)
+      ]);
+      setOverview(overviewRes);
+      setMerchants(merchantsRes.merchants);
+      setFlags(flagsRes.flags);
+      if (!selectedMerchantId && merchantsRes.merchants[0]?.id) {
+        setSelectedMerchantId(merchantsRes.merchants[0].id);
+        setImpersonateMerchantId(merchantsRes.merchants[0].id);
+      }
+    } catch (error) {
+      setMessage(handleAdminError(error));
     }
   };
 
   useEffect(() => {
+    if (!token) {
+      navigate("/admin/login", { replace: true });
+      return;
+    }
     void refresh();
-  }, [token]);
+  }, [navigate, token]);
 
   const selectedMerchant = useMemo(
     () => merchants.find((merchant) => merchant.id === selectedMerchantId) ?? null,
@@ -75,7 +100,7 @@ export function AdminPage() {
       await task();
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Admin action failed");
+      setMessage(handleAdminError(error));
     } finally {
       setBusy(false);
     }
@@ -99,20 +124,21 @@ export function AdminPage() {
     });
   };
 
-  if (!hasAnyRole(["OWNER", "ADMIN"])) {
-    return (
-      <section className="page-stack">
-        <PageHeader title="Platform Admin" subtitle="Restricted access" />
-        <Card>
-          <p className="status-text error">This area is restricted to platform operators and owners.</p>
-        </Card>
-      </section>
-    );
+  if (!token) {
+    return null;
   }
 
   return (
     <section className="page-stack">
-      <PageHeader title="Platform Admin" subtitle="Merchant activation, trial control, plan support, and platform oversight for Novoriq Stock Plattform." />
+      <PageHeader
+        action={
+          <Button onClick={exitToAdminLogin} variant="secondary">
+            Logout
+          </Button>
+        }
+        title="Platform Admin"
+        subtitle="Merchant activation, trial control, plan support, and platform oversight for Novoriq Stock Plattform."
+      />
       {message ? <p className="status-text">{message}</p> : null}
 
       {overview ? (

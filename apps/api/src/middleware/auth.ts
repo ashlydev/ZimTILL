@@ -1,5 +1,5 @@
 import { NextFunction, Request, Response } from "express";
-import { verifyToken } from "../lib/token";
+import { isPlatformAdminToken, verifyToken } from "../lib/token";
 import { prisma } from "../lib/prisma";
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -13,6 +13,12 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   try {
     const token = authHeader.replace("Bearer ", "");
     const decoded = verifyToken(token);
+
+    if (isPlatformAdminToken(decoded)) {
+      res.status(401).json({ message: "Merchant session required" });
+      return;
+    }
+
     const [user, device, merchant] = await Promise.all([
       prisma.user.findFirst({
         where: {
@@ -54,7 +60,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       role: user.role,
       identifier: user.identifier,
       branchId: device.activeBranchId ?? user.defaultBranchId ?? decoded.branchId ?? null,
-      platformAccess: user.isPlatformAdmin || decoded.platformAccess || user.role === "OWNER"
+      platformAccess: false
     };
     next();
   } catch {
