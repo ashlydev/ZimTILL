@@ -59,11 +59,16 @@ export const branchSchema = baseEntitySchema.extend({
   isDefault: z.boolean().default(false)
 });
 
+export const categorySchema = baseEntitySchema.extend({
+  name: z.string().trim().min(1).max(120)
+});
+
 export const productSchema = baseEntitySchema.extend({
   name: z.string().trim().min(1).max(120),
   price: z.number().nonnegative(),
   cost: z.number().nonnegative().nullable(),
   sku: z.string().trim().max(60).nullable(),
+  categoryId: z.string().uuid().nullable().optional(),
   category: z.string().trim().max(60).nullable().optional(),
   stockQty: z.number(),
   lowStockThreshold: z.number().nonnegative(),

@@ -43,16 +43,23 @@ export async function getPublicCatalog(prisma: PrismaClient, merchantSlug: strin
       isPublished: true,
       isActive: true
     },
+    include: {
+      categoryRef: true
+    },
     orderBy: [{ category: "asc" }, { name: "asc" }]
   });
 
-  const categories = [...new Set(products.map((product) => product.category).filter(Boolean))];
+  const mappedProducts = products.map((product) => ({
+    ...product,
+    category: product.categoryRef?.name ?? product.category ?? null
+  }));
+  const categories = [...new Set(mappedProducts.map((product) => product.category).filter(Boolean))];
 
   return {
     merchant: toPlain(merchant),
     settings: toPlain(settings),
     categories,
-    products: toPlain(products)
+    products: toPlain(mappedProducts)
   };
 }
 

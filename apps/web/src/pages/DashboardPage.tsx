@@ -21,15 +21,39 @@ type DashboardData = {
 
 function emptyReport(): ReportsSummary {
   return {
-    salesBasis: "CONFIRMED_PAYMENTS",
+    salesBasis: "PAYMENTS_RECEIVED",
+    ordersCountBasis: "ORDERS_CREATED",
+    generatedAt: new Date().toISOString(),
     today: {
       salesTotal: 0,
-      ordersCount: 0
+      ordersCount: 0,
+      outstandingTotal: 0
     },
     last7Days: {
       salesTotal: 0,
       ordersCount: 0,
-      topProducts: []
+      outstandingTotal: 0,
+      topProducts: [],
+      topCategories: []
+    },
+    last30Days: {
+      salesTotal: 0,
+      ordersCount: 0,
+      outstandingTotal: 0,
+      topProducts: [],
+      topCategories: []
+    },
+    daily: [],
+    topProducts: [],
+    topCategories: [],
+    lowStock: [],
+    returnsExpired: {
+      returnsCount: 0,
+      returnsValue: 0,
+      expiredCount: 0,
+      expiredValue: 0,
+      damagedCount: 0,
+      damagedValue: 0
     }
   };
 }

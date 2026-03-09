@@ -5,6 +5,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProductsPage } from "./pages/ProductsPage";
+import { CategoriesPage } from "./pages/CategoriesPage";
 import { CustomersPage } from "./pages/CustomersPage";
 import { OrdersPage } from "./pages/OrdersPage";
 import { OrderCreatePage } from "./pages/OrderCreatePage";
@@ -21,6 +22,7 @@ import { CatalogPage } from "./pages/CatalogPage";
 import { PricingPage } from "./pages/PricingPage";
 import { AdminPage } from "./pages/AdminPage";
 import { PublicCatalogPage } from "./pages/PublicCatalogPage";
+import { SyncStatusPage } from "./pages/SyncStatusPage";
 
 function ProtectedRoutes() {
   const { token, loading } = useAuth();
@@ -62,6 +64,14 @@ export default function App() {
         }
       />
       <Route
+        path="/admin/login"
+        element={
+          <PublicOnlyRoutes>
+            <LoginPage />
+          </PublicOnlyRoutes>
+        }
+      />
+      <Route
         path="/register"
         element={
           <PublicOnlyRoutes>
@@ -79,6 +89,7 @@ export default function App() {
         <Route path="/orders/:id" element={<OrderDetailsPage />} />
         <Route path="/orders/:id/receipt" element={<ReceiptPage />} />
         <Route path="/products" element={<ProductsPage />} />
+        <Route path="/categories" element={<CategoriesPage />} />
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/payments" element={<PaymentsPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
@@ -88,6 +99,7 @@ export default function App() {
         <Route path="/branches" element={<BranchesPage />} />
         <Route path="/catalog" element={<CatalogPage />} />
         <Route path="/pricing" element={<PricingPage />} />
+        <Route path="/sync-status" element={<SyncStatusPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>

@@ -234,6 +234,10 @@ export async function login(
     throw new HttpError(401, "Invalid credentials");
   }
 
+  if (!user.merchant?.isActive) {
+    throw new HttpError(403, "Merchant account is deactivated. Contact support on WhatsApp for help.", "MERCHANT_DISABLED");
+  }
+
   const isValid = await bcrypt.compare(args.pin, user.pinHash);
   if (!isValid) {
     throw new HttpError(401, "Invalid credentials");

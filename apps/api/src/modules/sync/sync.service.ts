@@ -1,4 +1,5 @@
 import {
+  categorySchema,
   customerSchema,
   featureFlagSchema,
   orderItemSchema,
@@ -115,6 +116,7 @@ async function upsertEntity(
         price: payload.price,
         cost: payload.cost,
         sku: payload.sku,
+        categoryId: payload.categoryId ?? null,
         category: payload.category,
         stockQty: payload.stockQty,
         lowStockThreshold: payload.lowStockThreshold,
@@ -130,6 +132,36 @@ async function upsertEntity(
         await tx.product.update({ where: { id: payload.id }, data });
       } else {
         await tx.product.create({
+          data: {
+            id: payload.id,
+            merchantId: actor.merchantId,
+            ...data
+          }
+        });
+      }
+
+      return;
+    }
+
+    case "category": {
+      const payload = categorySchema.parse(operation.payload);
+      ensureMerchantScope(payload.merchantId, actor.merchantId);
+
+      const existing = await tx.category.findFirst({ where: { id: payload.id, merchantId: actor.merchantId } });
+      if (existing && !isClientNewer(operation, existing.updatedAt)) return;
+
+      const data = {
+        name: payload.name,
+        createdAt: new Date(payload.createdAt),
+        deletedAt: dateValue(payload.deletedAt),
+        version: payload.version,
+        ...baseAuditData(existing?.createdByUserId, actor, operation)
+      };
+
+      if (existing) {
+        await tx.category.update({ where: { id: payload.id }, data });
+      } else {
+        await tx.category.create({
           data: {
             id: payload.id,
             merchantId: actor.merchantId,
@@ -452,6 +484,9 @@ async function softDeleteEntity(
   };
 
   switch (operation.entityType) {
+    case "category":
+      await tx.category.updateMany({ where: { id: operation.entityId, merchantId: actor.merchantId }, data: baseDelete });
+      return;
     case "product":
       await tx.product.updateMany({ where: { id: operation.entityId, merchantId: actor.merchantId }, data: baseDelete });
       return;
@@ -580,8 +615,9 @@ export async function handleSyncPull(
   const sinceDate = since ? new Date(since) : undefined;
   const updatedFilter = sinceDate ? { updatedAt: { gt: sinceDate } } : {};
 
-  const [products, customers, orders, orderItems, payments, paynowTransactions, stockMovements, settings, featureFlags] =
+  const [categories, products, customers, orders, orderItems, payments, paynowTransactions, stockMovements, settings, featureFlags] =
     await Promise.all([
+      prisma.category.findMany({ where: { merchantId: actor.merchantId, ...updatedFilter } }),
       prisma.product.findMany({ where: { merchantId: actor.merchantId, ...updatedFilter } }),
       prisma.customer.findMany({ where: { merchantId: actor.merchantId, ...updatedFilter } }),
       prisma.order.findMany({ where: { merchantId: actor.merchantId, ...updatedFilter } }),
@@ -602,6 +638,7 @@ export async function handleSyncPull(
     serverTime: new Date().toISOString(),
     changes: {
       branches: [],
+      categories,
       products,
       productStocks: [],
       customers,

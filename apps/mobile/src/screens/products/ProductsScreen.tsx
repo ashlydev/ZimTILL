@@ -1,11 +1,11 @@
-import React, { useCallback, useMemo, useState } from "react";
-import { Alert, FlatList, StyleSheet, Text, TextInput, View } from "react-native";
+import React, { useCallback, useState } from "react";
+import { Alert, FlatList, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Card } from "../../components/Card";
 import { Screen } from "../../components/Screen";
 import { AppButton } from "../../components/AppButton";
 import { AppInput } from "../../components/AppInput";
 import { useAuth } from "../../contexts/AuthContext";
-import { adjustStock, deleteProduct, listProducts, saveProduct } from "../../data/repository";
+import { adjustStock, deleteProduct, listCategories, listProducts, saveProduct } from "../../data/repository";
 import { useRefreshOnFocus } from "../../hooks/useRefreshOnFocus";
 import { colors, spacing } from "../../constants/theme";
 import { formatMoney } from "../../utils/format";
@@ -14,6 +14,8 @@ export function ProductsScreen() {
   const { session } = useAuth();
   const [search, setSearch] = useState("");
   const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [categories, setCategories] = useState<Record<string, unknown>[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [items, setItems] = useState<Record<string, unknown>[]>([]);
   const [editing, setEditing] = useState<Record<string, unknown> | null>(null);
 
@@ -21,14 +23,19 @@ export function ProductsScreen() {
   const [price, setPrice] = useState("0");
   const [cost, setCost] = useState("");
   const [sku, setSku] = useState("");
+  const [categoryId, setCategoryId] = useState("");
   const [stockQty, setStockQty] = useState("0");
   const [lowStockThreshold, setLowStockThreshold] = useState("0");
 
   const load = useCallback(async () => {
     if (!session) return;
-    const rows = await listProducts(session.merchantId, search, lowStockOnly);
+    const [rows, categoryRows] = await Promise.all([
+      listProducts(session.merchantId, search, lowStockOnly, selectedCategoryId || undefined),
+      listCategories(session.merchantId)
+    ]);
     setItems(rows);
-  }, [session, search, lowStockOnly]);
+    setCategories(categoryRows);
+  }, [session, search, lowStockOnly, selectedCategoryId]);
 
   useRefreshOnFocus(load);
   React.useEffect(() => {
@@ -41,6 +48,7 @@ export function ProductsScreen() {
     setPrice("0");
     setCost("");
     setSku("");
+    setCategoryId("");
     setStockQty("0");
     setLowStockThreshold("0");
   };
@@ -51,6 +59,7 @@ export function ProductsScreen() {
     setPrice(String(item.price ?? 0));
     setCost(item.cost == null ? "" : String(item.cost));
     setSku(String(item.sku ?? ""));
+    setCategoryId(String(item.categoryId ?? ""));
     setStockQty(String(item.stockQty ?? 0));
     setLowStockThreshold(String(item.lowStockThreshold ?? 0));
   };
@@ -71,6 +80,7 @@ export function ProductsScreen() {
           price: Number(price || 0),
           cost: cost ? Number(cost) : null,
           sku: sku || null,
+          categoryId: categoryId || null,
           stockQty: Number(stockQty || 0),
           lowStockThreshold: Number(lowStockThreshold || 0)
         }
@@ -120,6 +130,22 @@ export function ProductsScreen() {
           placeholder="Search products"
           placeholderTextColor={colors.slate}
         />
+        <Text style={styles.meta}>Category filter</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+          <AppButton
+            label="All categories"
+            variant={!selectedCategoryId ? "primary" : "secondary"}
+            onPress={() => setSelectedCategoryId("")}
+          />
+          {categories.map((item) => (
+            <AppButton
+              key={String(item.id)}
+              label={String(item.name)}
+              variant={selectedCategoryId === String(item.id) ? "primary" : "secondary"}
+              onPress={() => setSelectedCategoryId(String(item.id))}
+            />
+          ))}
+        </ScrollView>
         <View style={styles.row}>
           <AppButton
             label={lowStockOnly ? "Showing low stock" : "Filter low stock"}
@@ -136,6 +162,22 @@ export function ProductsScreen() {
         <AppInput label="Price" value={price} onChangeText={setPrice} keyboardType="decimal-pad" />
         <AppInput label="Cost (optional)" value={cost} onChangeText={setCost} keyboardType="decimal-pad" />
         <AppInput label="SKU (optional)" value={sku} onChangeText={setSku} />
+        <Text style={styles.meta}>Category</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+          <AppButton
+            label="No category"
+            variant={!categoryId ? "primary" : "secondary"}
+            onPress={() => setCategoryId("")}
+          />
+          {categories.map((item) => (
+            <AppButton
+              key={String(item.id)}
+              label={String(item.name)}
+              variant={categoryId === String(item.id) ? "primary" : "secondary"}
+              onPress={() => setCategoryId(String(item.id))}
+            />
+          ))}
+        </ScrollView>
         <AppInput label="Stock Qty" value={stockQty} onChangeText={setStockQty} keyboardType="decimal-pad" />
         <AppInput
           label="Low Stock Threshold"
@@ -156,6 +198,7 @@ export function ProductsScreen() {
         renderItem={({ item }) => (
           <Card>
             <Text style={styles.itemTitle}>{String(item.name)}</Text>
+            <Text style={styles.itemMeta}>Category: {String(item.category ?? "Uncategorized")}</Text>
             <Text style={styles.itemMeta}>Price: {formatMoney(Number(item.price), symbol)}</Text>
             <Text style={styles.itemMeta}>Stock: {Number(item.stockQty)}</Text>
             <View style={styles.row}>
@@ -206,6 +249,10 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: spacing.sm
   },
+  chipRow: {
+    gap: spacing.sm,
+    paddingVertical: 2
+  },
   formTitle: {
     color: colors.dark,
     fontWeight: "700",
@@ -225,5 +272,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: "center",
     paddingVertical: spacing.md
+  },
+  meta: {
+    color: colors.slate,
+    fontSize: 13
   }
 });

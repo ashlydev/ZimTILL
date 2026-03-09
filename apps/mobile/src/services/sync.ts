@@ -69,6 +69,7 @@ export async function syncNow(input: SyncNowInput): Promise<{ pushed: number; pu
   await setSyncState({ lastPullAt: pull.serverTime, lastError: null });
 
   const pulledCount =
+    pull.changes.categories.length +
     pull.changes.products.length +
     pull.changes.customers.length +
     pull.changes.orders.length +

@@ -38,8 +38,8 @@ export function LoginScreen({ navigation }: Props) {
   return (
     <Screen>
       <View style={styles.hero}>
-        <Text style={styles.title}>ZimTILL</Text>
-        <Text style={styles.subtitle}>Offline-first orders, payments, and stock for Zimbabwean hardware shops and SMEs.</Text>
+        <Text style={styles.title}>Novoriq Stock Plattform</Text>
+        <Text style={styles.subtitle}>Offline-first stock, orders, payments, and reporting for Zimbabwean SMEs.</Text>
       </View>
 
       <Card>

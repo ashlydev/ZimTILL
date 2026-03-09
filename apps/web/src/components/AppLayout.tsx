@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { classNames } from "../lib/format";
@@ -15,6 +16,7 @@ const navItems: NavItem[] = [
   { to: "/", label: "Dashboard" },
   { to: "/orders", label: "Orders" },
   { to: "/products", label: "Products" },
+  { to: "/categories", label: "Categories", roles: ["OWNER", "ADMIN", "MANAGER", "STOCK_CONTROLLER"] },
   { to: "/customers", label: "Customers", roles: ["OWNER", "ADMIN", "MANAGER", "CASHIER"] },
   { to: "/payments", label: "Payments", roles: ["OWNER", "ADMIN", "MANAGER", "CASHIER"] },
   { to: "/inventory", label: "Inventory", roles: ["OWNER", "ADMIN", "MANAGER", "STOCK_CONTROLLER"] },
@@ -43,6 +45,7 @@ function getRouteTitle(pathname: string): string {
   if (pathname.startsWith("/orders/")) return "Order Details";
   if (pathname.startsWith("/orders")) return "Orders";
   if (pathname.startsWith("/products")) return "Products";
+  if (pathname.startsWith("/categories")) return "Categories";
   if (pathname.startsWith("/customers")) return "Customers";
   if (pathname.startsWith("/payments")) return "Payments";
   if (pathname.startsWith("/inventory")) return "Inventory";
@@ -52,14 +55,16 @@ function getRouteTitle(pathname: string): string {
   if (pathname.startsWith("/branches")) return "Branches";
   if (pathname.startsWith("/catalog")) return "Catalog";
   if (pathname.startsWith("/pricing")) return "Pricing";
+  if (pathname.startsWith("/sync-status")) return "Sync Status";
   if (pathname.startsWith("/admin")) return "Platform Admin";
   if (pathname.startsWith("/settings")) return "Settings";
-  return "ZimTILL";
+  return "Novoriq Stock Plattform";
 }
 
 export function AppLayout() {
   const { merchant, user, branches, activeBranchId, switchBranch, hasFeature, logout, syncing, syncNow, lastSyncAt, syncError, isOnline } = useAuth();
   const location = useLocation();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const visibleSidebarItems = navItems.filter((item) => {
     if (item.roles && (!user || !item.roles.includes(user.role))) {
@@ -83,9 +88,9 @@ export function AppLayout() {
 
   return (
     <div className="app-shell">
-      <aside className="app-sidebar" aria-label="Primary">
+      <aside className={`app-sidebar ${mobileNavOpen ? "is-open" : ""}`} aria-label="Primary">
         <div className="sidebar-brand">
-          <p className="sidebar-kicker">ZimTILL</p>
+          <p className="sidebar-kicker">Novoriq Stock Plattform</p>
           <h1>{merchant?.name ?? "Merchant"}</h1>
         </div>
 
@@ -95,6 +100,7 @@ export function AppLayout() {
               key={item.to}
               className={({ isActive }) => classNames("sidebar-link", isActive && "is-active")}
               end={item.to === "/"}
+              onClick={() => setMobileNavOpen(false)}
               to={item.to}
             >
               {item.label}
@@ -102,10 +108,14 @@ export function AppLayout() {
           ))}
         </nav>
       </aside>
+      {mobileNavOpen ? <button aria-label="Close menu" className="sidebar-overlay" onClick={() => setMobileNavOpen(false)} type="button" /> : null}
 
       <div className="app-main">
         <header className="app-topbar">
           <div>
+            <button className="mobile-menu-button" onClick={() => setMobileNavOpen((prev) => !prev)} type="button">
+              Menu
+            </button>
             <p className="topbar-kicker">{merchant?.name ?? "Merchant"}</p>
             <h2>{getRouteTitle(location.pathname)}</h2>
           </div>

@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from "react";
 import { Alert, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import * as Linking from "expo-linking";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Screen } from "../../components/Screen";
@@ -18,6 +19,8 @@ import {
 } from "../../data/repository";
 import { useRefreshOnFocus } from "../../hooks/useRefreshOnFocus";
 import { MainStackParamList } from "../../navigation/types";
+
+const PLATFORM_SUPPORT_PHONE = "0782576106";
 
 export function SettingsScreen() {
   const { session, logout } = useAuth();
@@ -82,7 +85,7 @@ export function SettingsScreen() {
     const text = JSON.stringify(backup, null, 2);
     setBackupJson(text);
     await Share.share({
-      title: "ZimTILL Backup",
+      title: "Novoriq Stock Plattform Backup",
       message: text
     });
   };
@@ -152,6 +155,18 @@ export function SettingsScreen() {
         />
         <TextInput style={styles.textInput} value={supportPhone} onChangeText={setSupportPhone} placeholder="Support phone" />
         <TextInput style={styles.textInput} value={supportEmail} onChangeText={setSupportEmail} placeholder="Support email" />
+        <View style={styles.row}>
+          <AppButton
+            label="WhatsApp Support"
+            variant="secondary"
+            onPress={() =>
+              void Linking.openURL(
+                `https://wa.me/263782576106?text=${encodeURIComponent("Hello, I need help with Novoriq Stock Plattform.")}`
+              )
+            }
+          />
+        </View>
+        <Text style={styles.meta}>Platform support: {PLATFORM_SUPPORT_PHONE}</Text>
       </Card>
 
       <Card>

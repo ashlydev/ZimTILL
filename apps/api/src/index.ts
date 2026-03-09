@@ -5,5 +5,5 @@ const app = createApp();
 
 app.listen(env.PORT, () => {
   // eslint-disable-next-line no-console
-  console.log(`Novoriq Orders API listening on http://localhost:${env.PORT}`);
+  console.log(`Novoriq Stock Plattform API listening on http://localhost:${env.PORT}`);
 });

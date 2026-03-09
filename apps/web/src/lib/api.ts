@@ -1,6 +1,7 @@
 import type {
   BackupPayload,
   Branch,
+  Category,
   CatalogPublicPayload,
   CatalogSettings,
   Customer,
@@ -29,12 +30,14 @@ import {
   cancelOrderLocal,
   confirmOrderLocal,
   createOrderLocal,
+  deleteCategoryLocal,
   deleteCustomerLocal,
   deleteProductLocal,
   getLowStockLocal,
   getOrderDetailsLocal,
   getReceiptLocal,
   getReportsLocal,
+  listCategoriesLocal,
   listCustomersLocal,
   listOrdersLocal,
   listPaymentsLocal,
@@ -42,6 +45,7 @@ import {
   listStockMovementsLocal,
   onlinePaymentsMessage,
   recordInventoryAdjustmentLocal,
+  saveCategoryLocal,
   saveCustomerLocal,
   saveProductLocal,
   syncOfflineCore
@@ -203,10 +207,26 @@ export const api = {
       body: JSON.stringify({ branchId })
     });
   },
-  listProducts(token: string, search = "", lowStockOnly = false, branchId?: string | null) {
+  listCategories(token: string) {
+    void token;
+    return listCategoriesLocal().then((categories) => ({ categories }));
+  },
+  createCategory(token: string, payload: Pick<Category, "name">) {
+    void token;
+    return saveCategoryLocal({ name: payload.name }).then((category) => ({ category }));
+  },
+  updateCategory(token: string, id: string, payload: Partial<Pick<Category, "name">>) {
+    void token;
+    return saveCategoryLocal({ id, name: String(payload.name ?? "") }).then((category) => ({ category }));
+  },
+  deleteCategory(token: string, id: string) {
+    void token;
+    return deleteCategoryLocal(id).then(async () => ({ category: (await listCategoriesLocal()).find((category) => category.id === id) ?? null }));
+  },
+  listProducts(token: string, search = "", lowStockOnly = false, branchId?: string | null, categoryId = "") {
     void token;
     void branchId;
-    return listProductsLocal(search, lowStockOnly).then((products) => ({ products }));
+    return listProductsLocal(search, lowStockOnly, categoryId).then((products) => ({ products }));
   },
   createProduct(token: string, payload: Partial<Product>) {
     void token;
@@ -216,6 +236,7 @@ export const api = {
       price: Number(payload.price ?? 0),
       cost: payload.cost ?? null,
       sku: payload.sku ?? null,
+      categoryId: payload.categoryId ?? null,
       stockQty: Number(payload.stockQty ?? 0),
       lowStockThreshold: Number(payload.lowStockThreshold ?? 0)
     }).then((product) => ({ product }));
@@ -228,6 +249,7 @@ export const api = {
       price: Number(payload.price ?? 0),
       cost: payload.cost ?? null,
       sku: payload.sku ?? null,
+      categoryId: payload.categoryId ?? null,
       stockQty: Number(payload.stockQty ?? 0),
       lowStockThreshold: Number(payload.lowStockThreshold ?? 0)
     }).then((product) => ({ product }));
@@ -518,7 +540,7 @@ export const api = {
     }>("/admin/overview", { token });
   },
   listAdminMerchants(token: string) {
-    return apiRequest<{ merchants: Array<Merchant & { subscriptions?: Subscription[]; usageCounters?: UsageCounter[] }> }>("/admin/merchants", { token });
+    return apiRequest<{ merchants: Array<Merchant & { users?: StaffUser[]; subscriptions?: Subscription[]; usageCounters?: UsageCounter[] }> }>("/admin/merchants", { token });
   },
   listAdminFeatureFlags(token: string) {
     return apiRequest<{ flags: FeatureFlag[] }>("/admin/feature-flags", { token });
@@ -539,6 +561,37 @@ export const api = {
   },
   adminImpersonate(token: string, payload: { merchantId: string; userId?: string }) {
     return apiRequest<{ token: string; user: StaffUser }>("/admin/support/impersonate", {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload)
+    });
+  },
+  adminSetMerchantStatus(token: string, payload: { merchantId: string; isActive: boolean; notes?: string; paymentReference?: string }) {
+    return apiRequest<{ merchant: Merchant }>("/admin/merchants/status", {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload)
+    });
+  },
+  adminExtendTrial(token: string, payload: { merchantId: string; days: number }) {
+    return apiRequest<{ subscription: Subscription }>("/admin/merchants/extend-trial", {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload)
+    });
+  },
+  adminSetPlan(
+    token: string,
+    payload: {
+      merchantId: string;
+      planCode: "STARTER" | "PRO" | "BUSINESS" | "ENTERPRISE";
+      durationDays?: number;
+      status?: "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELLED";
+      notes?: string;
+      paymentReference?: string;
+    }
+  ) {
+    return apiRequest<{ subscription: Subscription }>("/admin/merchants/set-plan", {
       method: "POST",
       token,
       body: JSON.stringify(payload)

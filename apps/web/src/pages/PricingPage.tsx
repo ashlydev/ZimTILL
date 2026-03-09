@@ -8,6 +8,8 @@ import { Input } from "../components/ui/FormControls";
 import { PageHeader } from "../components/ui/PageHeader";
 import { StatCard } from "../components/ui/StatCard";
 
+const SUPPORT_PHONE = "0782576106";
+
 export function PricingPage() {
   const { token, subscription } = useAuth();
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -15,6 +17,15 @@ export function PricingPage() {
   const [currentSubscription, setCurrentSubscription] = useState<Subscription | null>(subscription);
   const [notes, setNotes] = useState("");
   const [message, setMessage] = useState("");
+
+  const trialDaysRemaining =
+    currentSubscription?.status === "TRIALING" && currentSubscription.billingPeriodEnd
+      ? Math.max(0, Math.ceil((new Date(currentSubscription.billingPeriodEnd).getTime() - Date.now()) / 86_400_000))
+      : 0;
+  const isExpired =
+    !!currentSubscription &&
+    currentSubscription.status !== "ACTIVE" &&
+    new Date(currentSubscription.billingPeriodEnd).getTime() < Date.now();
 
   useEffect(() => {
     const load = async () => {
@@ -42,8 +53,33 @@ export function PricingPage() {
 
   return (
     <section className="page-stack">
-      <PageHeader title="Pricing" subtitle="Track your plan, feature limits, and submit upgrade requests." />
+      <PageHeader title="Pricing" subtitle="Every merchant starts with a 7-day free trial. After that, activate manually after EcoCash payment confirmation." />
       {message ? <p className="status-text">{message}</p> : null}
+
+      {currentSubscription?.status === "TRIALING" ? (
+        <Card title="Free Trial" subtitle="Starter limits apply during the trial window.">
+          <p className={isExpired ? "status-text error" : "status-text warning"}>
+            {isExpired ? "Trial expired. Activate your account to continue creating or editing records." : `${trialDaysRemaining} day(s) left in the free trial.`}
+          </p>
+        </Card>
+      ) : null}
+
+      <Card title="Manual Activation" subtitle="Customer pays EcoCash, sends proof on WhatsApp, then a platform admin activates the merchant.">
+        <div className="metric-list">
+          <div className="metric-list-row">
+            <span>EcoCash number</span>
+            <strong>{SUPPORT_PHONE}</strong>
+          </div>
+          <div className="metric-list-row">
+            <span>Reference</span>
+            <strong>Business name + phone</strong>
+          </div>
+          <div className="metric-list-row">
+            <span>WhatsApp proof</span>
+            <strong>Send payment screenshot to support</strong>
+          </div>
+        </div>
+      </Card>
 
       <div className="stats-grid">
         <StatCard label="Current Plan" value={currentSubscription?.plan?.name ?? "Starter"} />

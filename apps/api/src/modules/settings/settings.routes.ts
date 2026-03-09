@@ -543,9 +543,10 @@ settingsRouter.get(
   asyncHandler(async (req, res) => {
     const merchantId = req.user!.merchantId;
 
-    const [merchant, settings, products, customers, orders, orderItems, payments, stockMovements] = await Promise.all([
+    const [merchant, settings, categories, products, customers, orders, orderItems, payments, stockMovements] = await Promise.all([
       prisma.merchant.findUnique({ where: { id: merchantId } }),
       prisma.settings.findMany({ where: { merchantId, deletedAt: null }, orderBy: { updatedAt: "asc" } }),
+      prisma.category.findMany({ where: { merchantId, deletedAt: null }, orderBy: { updatedAt: "asc" } }),
       prisma.product.findMany({ where: { merchantId, deletedAt: null }, orderBy: { updatedAt: "asc" } }),
       prisma.customer.findMany({ where: { merchantId, deletedAt: null }, orderBy: { updatedAt: "asc" } }),
       prisma.order.findMany({ where: { merchantId, deletedAt: null }, orderBy: { updatedAt: "asc" } }),
@@ -560,6 +561,7 @@ settingsRouter.get(
       merchant: toPlain(merchant),
       data: toPlain({
         settings,
+        categories,
         products,
         customers,
         orders,
@@ -575,6 +577,7 @@ settingsRouter.get(
       entityId: merchantId,
       metadata: {
         counts: {
+          categories: categories.length,
           products: products.length,
           customers: customers.length,
           orders: orders.length,
@@ -603,6 +606,7 @@ settingsRouter.post(
     const data = (backup.data ?? backup) as Record<string, unknown>;
 
     const settingsRows = Array.isArray(data.settings) ? data.settings : [];
+    const categoriesRows = Array.isArray(data.categories) ? data.categories : [];
     const productsRows = Array.isArray(data.products) ? data.products : [];
     const customersRows = Array.isArray(data.customers) ? data.customers : [];
     const ordersRows = Array.isArray(data.orders) ? data.orders : [];
@@ -665,10 +669,46 @@ settingsRouter.post(
         }
       }
 
+      for (const row of categoriesRows) {
+        if (!row || typeof row !== "object") continue;
+        const record = row as Record<string, unknown>;
+        const id = typeof record.id === "string" ? record.id : randomUUID();
+
+        const existingById = await tx.category.findUnique({ where: { id } });
+        if (existingById && existingById.merchantId !== merchantId) continue;
+
+        if (existingById) {
+          await tx.category.update({
+            where: { id: existingById.id },
+            data: {
+              name: toNullableString(record.name) ?? existingById.name,
+              updatedAt: now,
+              version: { increment: 1 },
+              lastModifiedByDeviceId: req.user!.deviceId,
+              deletedAt: null
+            }
+          });
+        } else {
+          await tx.category.create({
+            data: {
+              id,
+              merchantId,
+              name: toNullableString(record.name) ?? "Imported Category",
+              createdAt: toDate(record.createdAt, now),
+              updatedAt: toDate(record.updatedAt, now),
+              version: Math.max(1, Math.floor(toNumber(record.version, 1))),
+              lastModifiedByDeviceId: toNullableString(record.lastModifiedByDeviceId) ?? req.user!.deviceId,
+              deletedAt: null
+            }
+          });
+        }
+      }
+
       for (const row of productsRows) {
         if (!row || typeof row !== "object") continue;
         const record = row as Record<string, unknown>;
         const id = typeof record.id === "string" ? record.id : randomUUID();
+        const categoryId = toNullableString(record.categoryId);
 
         const existingById = await tx.product.findUnique({ where: { id } });
         if (existingById && existingById.merchantId !== merchantId) continue;
@@ -681,6 +721,8 @@ settingsRouter.post(
               price: toNumber(record.price, Number(existingById.price)),
               cost: record.cost == null ? null : toNumber(record.cost),
               sku: toNullableString(record.sku),
+              categoryId,
+              category: toNullableString(record.category),
               stockQty: toNumber(record.stockQty, Number(existingById.stockQty)),
               lowStockThreshold: toNumber(record.lowStockThreshold, Number(existingById.lowStockThreshold)),
               updatedAt: now,
@@ -698,6 +740,8 @@ settingsRouter.post(
               price: toNumber(record.price),
               cost: record.cost == null ? null : toNumber(record.cost),
               sku: toNullableString(record.sku),
+              categoryId,
+              category: toNullableString(record.category),
               stockQty: toNumber(record.stockQty),
               lowStockThreshold: toNumber(record.lowStockThreshold, 0),
               createdAt: toDate(record.createdAt, now),

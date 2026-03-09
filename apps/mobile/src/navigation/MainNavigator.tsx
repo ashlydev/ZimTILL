@@ -10,6 +10,7 @@ import { CustomersScreen } from "../screens/customers/CustomersScreen";
 import { DeliveriesScreen } from "../screens/deliveries/DeliveriesScreen";
 import { HelpScreen } from "../screens/help/HelpScreen";
 import { HomeScreen } from "../screens/home/HomeScreen";
+import { CategoriesScreen } from "../screens/inventory/CategoriesScreen";
 import { DamagedGoodsScreen } from "../screens/inventory/DamagedGoodsScreen";
 import { ExpiredGoodsScreen } from "../screens/inventory/ExpiredGoodsScreen";
 import { InventoryScreen } from "../screens/inventory/InventoryScreen";
@@ -35,6 +36,10 @@ function canAccessPayments(role?: string | null) {
 }
 
 function canAccessInventory(role?: string | null) {
+  return role === "OWNER" || role === "ADMIN" || role === "MANAGER" || role === "STOCK_CONTROLLER";
+}
+
+function canAccessCategories(role?: string | null) {
   return role === "OWNER" || role === "ADMIN" || role === "MANAGER" || role === "STOCK_CONTROLLER";
 }
 
@@ -90,6 +95,15 @@ function getDrawerItems(role: string | null | undefined, navigate: TabsProps["na
         }
       },
       {
+        key: "categories",
+        label: "Categories",
+        icon: "CT",
+        onPress: () => {
+          close();
+          navigate("Categories");
+        }
+      },
+      {
         key: "returns",
         label: "Returns",
         icon: "RT",
@@ -117,6 +131,18 @@ function getDrawerItems(role: string | null | undefined, navigate: TabsProps["na
         }
       }
     );
+  }
+
+  if (canAccessCategories(role) && !items.some((item) => item.key === "categories")) {
+    items.push({
+      key: "categories",
+      label: "Categories",
+      icon: "CT",
+      onPress: () => {
+        close();
+        navigate("Categories");
+      }
+    });
   }
 
   if (canAccessDeliveries(role)) {
@@ -234,6 +260,7 @@ export function MainNavigator() {
       <Stack.Screen name="OrderDetails" component={OrderDetailsScreen} options={{ title: "Order Details" }} />
       <Stack.Screen name="PaynowCheckout" component={PaynowCheckoutScreen} options={{ title: "Paynow" }} />
       <Stack.Screen name="Customers" component={CustomersScreen} options={{ title: "Customers" }} />
+      <Stack.Screen name="Categories" component={CategoriesScreen} options={{ title: "Categories" }} />
       <Stack.Screen name="Inventory" component={InventoryScreen} options={{ title: "Inventory" }} />
       <Stack.Screen name="Payments" component={PaymentsScreen} options={{ title: "Payments" }} />
       <Stack.Screen name="Reports" component={ReportsScreen} options={{ title: "Reports" }} />

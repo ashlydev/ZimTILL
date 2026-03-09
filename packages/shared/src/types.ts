@@ -32,6 +32,7 @@ export type Merchant = {
   slug?: string;
   phone: string | null;
   email: string | null;
+  isActive?: boolean;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -42,6 +43,10 @@ export type Branch = BaseEntity & {
   address?: string | null;
   phone?: string | null;
   isDefault: boolean;
+};
+
+export type Category = BaseEntity & {
+  name: string;
 };
 
 export type User = {
@@ -95,6 +100,7 @@ export type Product = BaseEntity & {
   price: number;
   cost: number | null;
   sku: string | null;
+  categoryId?: string | null;
   category?: string | null;
   stockQty: number;
   lowStockThreshold: number;
@@ -220,6 +226,78 @@ export type FeatureFlag = {
   updatedAt: string;
 };
 
+export type ReportTopProduct = {
+  productId: string;
+  name: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  qtySold: number;
+  revenue: number;
+  profit: number | null;
+};
+
+export type ReportTopCategory = {
+  categoryId: string | null;
+  name: string;
+  qtySold: number;
+  revenue: number;
+  profit: number | null;
+};
+
+export type ReportDay = {
+  date: string;
+  paymentsTotal: number;
+  ordersCount: number;
+  outstandingTotal: number;
+  returnsQty: number;
+  expiredQty: number;
+  damagedQty: number;
+};
+
+export type ReportsSummary = {
+  salesBasis: "PAYMENTS_RECEIVED";
+  ordersCountBasis: "ORDERS_CREATED";
+  generatedAt: string;
+  today: {
+    salesTotal: number;
+    ordersCount: number;
+    outstandingTotal: number;
+  };
+  last7Days: {
+    salesTotal: number;
+    ordersCount: number;
+    outstandingTotal: number;
+    topProducts: Array<{ productId: string; name: string; categoryId: string | null; categoryName: string | null; qty: number; revenue: number; profit?: number | null }>;
+    topCategories: Array<{ categoryId: string | null; name: string; qty: number; revenue: number; profit?: number | null }>;
+  };
+  last30Days: {
+    salesTotal: number;
+    ordersCount: number;
+    outstandingTotal: number;
+    topProducts: Array<{ productId: string; name: string; categoryId: string | null; categoryName: string | null; qty: number; revenue: number; profit?: number | null }>;
+    topCategories: Array<{ categoryId: string | null; name: string; qty: number; revenue: number; profit?: number | null }>;
+  };
+  daily: ReportDay[];
+  topProducts: ReportTopProduct[];
+  topCategories: ReportTopCategory[];
+  lowStock: Array<{
+    productId: string;
+    name: string;
+    categoryId: string | null;
+    categoryName: string | null;
+    stockQty: number;
+    lowStockThreshold: number;
+  }>;
+  returnsExpired: {
+    returnsCount: number;
+    returnsValue: number;
+    expiredCount: number;
+    expiredValue: number;
+    damagedCount: number;
+    damagedValue: number;
+  };
+};
+
 export type SyncOperation = {
   opId: string;
   entityType: SyncEntityType;
@@ -245,6 +323,7 @@ export type SyncPullResponse = {
   serverTime: string;
   changes: {
     branches: Branch[];
+    categories: Category[];
     products: Product[];
     productStocks: ProductStock[];
     customers: Customer[];

@@ -13,7 +13,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   try {
     const token = authHeader.replace("Bearer ", "");
     const decoded = verifyToken(token);
-    const [user, device] = await Promise.all([
+    const [user, device, merchant] = await Promise.all([
       prisma.user.findFirst({
         where: {
           id: decoded.userId,
@@ -30,11 +30,22 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
           deletedAt: null,
           revokedAt: null
         }
+      }),
+      prisma.merchant.findFirst({
+        where: {
+          id: decoded.merchantId,
+          deletedAt: null
+        }
       })
     ]);
 
     if (!user || !device) {
       res.status(401).json({ message: "Session expired or device revoked" });
+      return;
+    }
+
+    if (!merchant?.isActive) {
+      res.status(403).json({ message: "Merchant account is deactivated. Contact support on WhatsApp for help.", code: "MERCHANT_DISABLED" });
       return;
     }
 

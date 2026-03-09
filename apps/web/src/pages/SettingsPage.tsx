@@ -11,6 +11,7 @@ import type { BackupPayload, DeviceSession, Role, Settings, StaffUser } from "..
 
 const defaultTemplate =
   "{businessName}\nOrder #{orderNumber}\n{items}\nTotal: {total}\nBalance: {balance}\nPayment: {paymentInstructions}\nThank you.";
+const PLATFORM_SUPPORT_PHONE = "0782576106";
 
 const emptyStaffForm = {
   identifier: "",
@@ -209,7 +210,7 @@ export function SettingsPage() {
     setError("");
     try {
       const backup = await api.exportBackup(token);
-      downloadJson(`zimtill-backup-${new Date().toISOString().slice(0, 10)}.json`, backup);
+      downloadJson(`zimstock-backup-${new Date().toISOString().slice(0, 10)}.json`, backup);
     } catch (exportError) {
       setError(exportError instanceof Error ? exportError.message : "Failed to export backup");
     } finally {
@@ -256,9 +257,14 @@ export function SettingsPage() {
       {canViewPricing ? (
         <Card
           action={
-            <Link className={getButtonClassName("primary")} to="/pricing">
-              Open Pricing
-            </Link>
+            <div className="inline-actions">
+              <Link className={getButtonClassName("secondary")} to="/sync-status">
+                Open Sync Status
+              </Link>
+              <Link className={getButtonClassName("primary")} to="/pricing">
+                Open Pricing
+              </Link>
+            </div>
           }
           subtitle="Plan details, usage limits, and upgrade requests."
           title="Subscription & Pricing"
@@ -353,6 +359,12 @@ export function SettingsPage() {
                 onChange={(event) => updateSettings((prev) => ({ ...prev, supportEmail: event.target.value }))}
                 value={settings.supportEmail ?? ""}
               />
+            </div>
+            <div className="actions-row wrap">
+              <a className={getButtonClassName("secondary")} href={`https://wa.me/263782576106?text=${encodeURIComponent("Hello, I need help with Novoriq Stock Plattform.")}`} rel="noreferrer" target="_blank">
+                WhatsApp Support
+              </a>
+              <p className="subtle-text">Platform support: {PLATFORM_SUPPORT_PHONE}</p>
             </div>
             <div className="install-note">
               <InstallAppButton />

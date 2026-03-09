@@ -96,6 +96,11 @@ textarea {
   color: var(--navy-900);
 }
 
+.sidebar-overlay,
+.mobile-menu-button {
+  display: none;
+}
+
 .sidebar-nav {
   display: grid;
   gap: var(--space-1);
@@ -912,7 +917,29 @@ textarea.input-control {
   }
 
   .app-sidebar {
-    display: none;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(300px, 86vw);
+    transform: translateX(-102%);
+    transition: transform 0.18s ease;
+    z-index: 40;
+    display: flex;
+    box-shadow: 0 20px 50px rgba(17, 24, 39, 0.2);
+  }
+
+  .app-sidebar.is-open {
+    transform: translateX(0);
+  }
+
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    border: 0;
+    background: rgba(17, 24, 39, 0.28);
   }
 
   .app-topbar {
@@ -981,6 +1008,20 @@ textarea.input-control {
   .topbar-actions {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .mobile-menu-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 8px;
+    border: 1px solid var(--gray-100);
+    background: var(--white);
+    color: var(--navy-900);
+    border-radius: var(--radius-sm);
+    min-height: 36px;
+    padding: 8px 12px;
+    font-weight: 700;
   }
 }
 

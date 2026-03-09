@@ -148,6 +148,7 @@ export function createInMemoryPrisma() {
   const featureFlags: AnyRecord[] = [];
   const auditLogs: AnyRecord[] = [];
   const syncLogs: AnyRecord[] = [];
+  const categories: AnyRecord[] = [];
   const products: AnyRecord[] = [];
   const productStocks: AnyRecord[] = [];
   const customers: AnyRecord[] = [];
@@ -542,6 +543,27 @@ export function createInMemoryPrisma() {
         return next;
       }
     },
+    category: {
+      create: async ({ data }: AnyRecord) => {
+        const next = withDefaults(data, { createdAt: new Date(), updatedAt: new Date(), deletedAt: null, version: 1 });
+        categories.push(next);
+        return next;
+      },
+      findUnique: async ({ where }: AnyRecord) => categories.find((item) => matchesWhere(item, where)) ?? null,
+      findFirst: async ({ where, orderBy }: AnyRecord = {}) => sortRecords(filterByWhere(categories, where), orderBy)[0] ?? null,
+      findMany: async ({ where, orderBy }: AnyRecord = {}) => sortRecords(filterByWhere(categories, where), orderBy),
+      update: async ({ where, data }: AnyRecord) => {
+        const existing = categories.find((item) => matchesWhere(item, where));
+        if (!existing) return null;
+        applyData(existing, data);
+        return existing;
+      },
+      updateMany: async ({ where, data }: AnyRecord) => {
+        const filtered = filterByWhere(categories, where);
+        filtered.forEach((item) => applyData(item, data));
+        return { count: filtered.length };
+      }
+    },
     product: {
       findFirst: async ({ where, orderBy }: AnyRecord = {}) => sortRecords(filterByWhere(products, where), orderBy)[0] ?? null,
       create: async ({ data }: AnyRecord) => {
@@ -799,6 +821,7 @@ export function createInMemoryPrisma() {
       auditLogs,
       syncLogs,
       products,
+      categories,
       productStocks,
       customers,
       orders,

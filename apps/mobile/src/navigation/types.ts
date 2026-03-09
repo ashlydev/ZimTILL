@@ -21,6 +21,7 @@ export type MainStackParamList = {
   Customers: undefined;
   Inventory: undefined;
   Payments: undefined;
+  Categories: undefined;
   Reports: undefined;
   Returns: undefined;
   ExpiredGoods: undefined;

@@ -90,11 +90,11 @@ export function InstallAppButton() {
   }
 
   if (!deferredPrompt && installStatus === "idle") {
-    return <p className="subtle-text">Open your browser menu and tap Install app to add ZimTILL.</p>;
+    return <p className="subtle-text">Open your browser menu and tap Install app to add Novoriq Stock Plattform.</p>;
   }
 
   if (installStatus === "accepted") {
-    return <p className="status-text success">ZimTILL is installed. Open it from your home screen.</p>;
+    return <p className="status-text success">Novoriq Stock Plattform is installed. Open it from your home screen.</p>;
   }
 
   if (installStatus === "dismissed") {
@@ -103,7 +103,7 @@ export function InstallAppButton() {
 
   return (
     <Button onClick={() => void onInstall()} variant="primary">
-      Install ZimTILL
+      Install Novoriq Stock Plattform
     </Button>
   );
 }

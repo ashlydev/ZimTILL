@@ -33,7 +33,7 @@ export function LoginPage() {
     <div className="auth-page">
       <form className="auth-card form-stack" onSubmit={onSubmit}>
         <div>
-          <p className="sidebar-kicker auth-brand">ZimTILL</p>
+          <p className="sidebar-kicker auth-brand">Novoriq Stock Plattform</p>
           <h1>Welcome Back</h1>
           <p className="subtle-text">Sign in with your phone or email and PIN.</p>
         </div>
@@ -67,7 +67,7 @@ export function LoginPage() {
         <div className="install-note form-stack">
           <InstallAppButton />
           <a className={getButtonClassName("secondary")} href={downloadUrl}>
-            Download ZimTILL
+            Download Novoriq Stock Plattform
           </a>
         </div>
 

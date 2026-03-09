@@ -179,7 +179,9 @@ export async function ensureMerchantBootstrap(
   });
 
   const starterPlan = await prisma.plan.findUniqueOrThrow({ where: { code: "STARTER" } });
-  const { periodStart, periodEnd } = monthWindow();
+  const periodStart = new Date();
+  const periodEnd = new Date(periodStart);
+  periodEnd.setDate(periodEnd.getDate() + 7);
 
   const subscription = await prisma.subscription.create({
     data: {

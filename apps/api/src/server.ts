@@ -13,7 +13,7 @@ console.log("API starting...", { port, nodeEnv: env.NODE_ENV });
 
 const server = app.listen(port, () => {
   // eslint-disable-next-line no-console
-  console.log(`Novoriq Orders API listening on port ${port}`);
+  console.log(`Novoriq Stock Plattform API listening on port ${port}`);
 });
 
 server.on("error", (error) => {

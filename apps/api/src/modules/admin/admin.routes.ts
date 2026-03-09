@@ -25,6 +25,29 @@ const impersonateSchema = z.object({
   userId: z.string().uuid().optional()
 });
 
+const merchantPlanCodeSchema = z.enum(["STARTER", "PRO", "BUSINESS", "ENTERPRISE"]);
+
+const merchantStatusSchema = z.object({
+  merchantId: z.string().uuid(),
+  isActive: z.boolean(),
+  notes: z.string().trim().max(500).optional(),
+  paymentReference: z.string().trim().max(120).optional()
+});
+
+const extendTrialSchema = z.object({
+  merchantId: z.string().uuid(),
+  days: z.number().int().min(1).max(365)
+});
+
+const setPlanSchema = z.object({
+  merchantId: z.string().uuid(),
+  planCode: merchantPlanCodeSchema,
+  durationDays: z.number().int().min(1).max(365).optional(),
+  status: z.enum(["TRIALING", "ACTIVE", "PAST_DUE", "CANCELLED"]).optional(),
+  notes: z.string().trim().max(500).optional(),
+  paymentReference: z.string().trim().max(120).optional()
+});
+
 export const adminRouter = Router();
 adminRouter.use(requireAuth);
 adminRouter.use(requirePlatformAccess);
@@ -58,6 +81,11 @@ adminRouter.get(
     const merchants = await prisma.merchant.findMany({
       where: { deletedAt: null },
       include: {
+        users: {
+          where: { deletedAt: null, role: "OWNER" },
+          orderBy: { createdAt: "asc" },
+          take: 1
+        },
         subscriptions: {
           include: { plan: true },
           orderBy: { updatedAt: "desc" },
@@ -72,6 +100,172 @@ adminRouter.get(
     });
 
     res.json({ merchants: toPlain(merchants) });
+  })
+);
+
+adminRouter.post(
+  "/merchants/status",
+  validateBody(merchantStatusSchema),
+  asyncHandler(async (req, res) => {
+    const { merchantId, isActive, notes, paymentReference } = req.body as z.infer<typeof merchantStatusSchema>;
+    const merchant = await prisma.merchant.findFirst({ where: { id: merchantId, deletedAt: null } });
+
+    if (!merchant) {
+      throw new HttpError(404, "Merchant not found");
+    }
+
+    const updated = await prisma.merchant.update({
+      where: { id: merchantId },
+      data: {
+        isActive,
+        updatedAt: new Date()
+      }
+    });
+
+    await recordAudit(prisma, req.user!, {
+      action: isActive ? "admin.activateMerchant" : "admin.deactivateMerchant",
+      entityType: "Merchant",
+      entityId: merchantId,
+      metadata: {
+        notes: notes ?? null,
+        paymentReference: paymentReference ?? null
+      }
+    });
+
+    res.json({ merchant: toPlain(updated) });
+  })
+);
+
+adminRouter.post(
+  "/merchants/extend-trial",
+  validateBody(extendTrialSchema),
+  asyncHandler(async (req, res) => {
+    const { merchantId, days } = req.body as z.infer<typeof extendTrialSchema>;
+    const merchant = await prisma.merchant.findFirst({ where: { id: merchantId, deletedAt: null } });
+
+    if (!merchant) {
+      throw new HttpError(404, "Merchant not found");
+    }
+
+    const starterPlan = await prisma.plan.findUnique({ where: { code: "STARTER" } });
+    if (!starterPlan) {
+      throw new HttpError(404, "Starter plan not found");
+    }
+
+    const current = await prisma.subscription.findFirst({
+      where: { merchantId },
+      orderBy: { updatedAt: "desc" }
+    });
+
+    const now = new Date();
+    const nextEnd = new Date(now);
+    nextEnd.setDate(nextEnd.getDate() + days);
+
+    const subscription = current
+      ? await prisma.subscription.update({
+          where: { id: current.id },
+          data: {
+            planId: starterPlan.id,
+            status: "TRIALING",
+            billingPeriodStart: now,
+            billingPeriodEnd: nextEnd
+          },
+          include: { plan: true }
+        })
+      : await prisma.subscription.create({
+          data: {
+            merchantId,
+            planId: starterPlan.id,
+            status: "TRIALING",
+            billingPeriodStart: now,
+            billingPeriodEnd: nextEnd
+          },
+          include: { plan: true }
+        });
+
+    await recordAudit(prisma, req.user!, {
+      action: "admin.extendTrial",
+      entityType: "Subscription",
+      entityId: subscription.id,
+      metadata: { merchantId, days }
+    });
+
+    res.json({ subscription: toPlain(subscription) });
+  })
+);
+
+adminRouter.post(
+  "/merchants/set-plan",
+  validateBody(setPlanSchema),
+  asyncHandler(async (req, res) => {
+    const { merchantId, planCode, durationDays, status, notes, paymentReference } = req.body as z.infer<typeof setPlanSchema>;
+    const merchant = await prisma.merchant.findFirst({ where: { id: merchantId, deletedAt: null } });
+
+    if (!merchant) {
+      throw new HttpError(404, "Merchant not found");
+    }
+
+    const plan = await prisma.plan.findUnique({ where: { code: planCode } });
+    if (!plan) {
+      throw new HttpError(404, "Plan not found");
+    }
+
+    const current = await prisma.subscription.findFirst({
+      where: { merchantId },
+      orderBy: { updatedAt: "desc" }
+    });
+
+    const now = new Date();
+    const nextEnd = new Date(now);
+    nextEnd.setDate(nextEnd.getDate() + (durationDays ?? 30));
+    const nextStatus = status ?? "ACTIVE";
+
+    const subscription = current
+      ? await prisma.subscription.update({
+          where: { id: current.id },
+          data: {
+            planId: plan.id,
+            status: nextStatus,
+            billingPeriodStart: now,
+            billingPeriodEnd: nextEnd,
+            cancelledAt: nextStatus === "CANCELLED" ? now : null
+          },
+          include: { plan: true }
+        })
+      : await prisma.subscription.create({
+          data: {
+            merchantId,
+            planId: plan.id,
+            status: nextStatus,
+            billingPeriodStart: now,
+            billingPeriodEnd: nextEnd,
+            cancelledAt: nextStatus === "CANCELLED" ? now : null
+          },
+          include: { plan: true }
+        });
+
+    await prisma.merchant.update({
+      where: { id: merchantId },
+      data: {
+        isActive: nextStatus !== "CANCELLED"
+      }
+    });
+
+    await recordAudit(prisma, req.user!, {
+      action: "admin.setPlan",
+      entityType: "Subscription",
+      entityId: subscription.id,
+      metadata: {
+        merchantId,
+        planCode,
+        durationDays: durationDays ?? 30,
+        status: nextStatus,
+        notes: notes ?? null,
+        paymentReference: paymentReference ?? null
+      }
+    });
+
+    res.json({ subscription: toPlain(subscription) });
   })
 );
 

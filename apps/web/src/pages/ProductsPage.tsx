@@ -1,13 +1,13 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
-import { loadWithCache } from "../lib/cache";
 import { formatMoney } from "../lib/format";
-import type { Product } from "../types";
+import type { Category, Product } from "../types";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
-import { Input } from "../components/ui/FormControls";
+import { Input, Select } from "../components/ui/FormControls";
 import { ListCard } from "../components/ui/ListCard";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Table, type TableColumn } from "../components/ui/Table";
@@ -17,42 +17,18 @@ const emptyForm = {
   price: "",
   cost: "",
   sku: "",
+  categoryId: "",
   stockQty: "0",
   lowStockThreshold: "5"
 };
 
-const productColumns: Array<TableColumn<Product>> = [
-  {
-    key: "name",
-    header: "Product",
-    render: (product) => (
-      <div>
-        <strong>{product.name}</strong>
-        <p className="subtle-text">{product.sku || "No SKU"}</p>
-      </div>
-    )
-  },
-  {
-    key: "price",
-    header: "Price",
-    render: (product) => formatMoney(Number(product.price))
-  },
-  {
-    key: "stock",
-    header: "Stock",
-    render: (product) => product.stockQty
-  },
-  {
-    key: "threshold",
-    header: "Low Threshold",
-    render: (product) => product.lowStockThreshold
-  }
-];
-
 export function ProductsPage() {
+  const navigate = useNavigate();
   const { token } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [search, setSearch] = useState("");
+  const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -60,14 +36,56 @@ export function ProductsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const categoryById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories]);
+  const categoryName = (product: Product) => categoryById.get(product.categoryId ?? "")?.name ?? product.category ?? "Uncategorized";
+
+  const productColumns: Array<TableColumn<Product>> = useMemo(
+    () => [
+      {
+        key: "name",
+        header: "Product",
+        render: (product) => (
+          <div>
+            <strong>{product.name}</strong>
+            <p className="subtle-text">{product.sku || "No SKU"}</p>
+          </div>
+        )
+      },
+      {
+        key: "category",
+        header: "Category",
+        render: (product) => categoryName(product)
+      },
+      {
+        key: "price",
+        header: "Price",
+        render: (product) => formatMoney(Number(product.price))
+      },
+      {
+        key: "stock",
+        header: "Stock",
+        render: (product) => product.stockQty
+      },
+      {
+        key: "threshold",
+        header: "Low Threshold",
+        render: (product) => product.lowStockThreshold
+      }
+    ],
+    [categoryById]
+  );
+
   const refresh = async () => {
     if (!token) return;
     setError("");
 
     try {
-      const cacheKey = `products:${search}:${lowStockOnly}`;
-      const result = await loadWithCache(cacheKey, () => api.listProducts(token, search, lowStockOnly));
-      setProducts(result.value.products);
+      const [productResult, categoryResult] = await Promise.all([
+        api.listProducts(token, search, lowStockOnly, null, selectedCategoryId),
+        api.listCategories(token)
+      ]);
+      setProducts(productResult.products);
+      setCategories(categoryResult.categories);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load products");
     }
@@ -75,7 +93,7 @@ export function ProductsPage() {
 
   useEffect(() => {
     void refresh();
-  }, [token, search, lowStockOnly]);
+  }, [token, search, lowStockOnly, selectedCategoryId]);
 
   const resetForm = () => {
     setForm(emptyForm);
@@ -96,6 +114,7 @@ export function ProductsPage() {
         price: Number(form.price),
         cost: form.cost ? Number(form.cost) : null,
         sku: form.sku.trim() || null,
+        categoryId: form.categoryId || null,
         stockQty: Number(form.stockQty),
         lowStockThreshold: Number(form.lowStockThreshold)
       };
@@ -123,6 +142,7 @@ export function ProductsPage() {
       price: String(product.price),
       cost: product.cost != null ? String(product.cost) : "",
       sku: product.sku ?? "",
+      categoryId: product.categoryId ?? "",
       stockQty: String(product.stockQty),
       lowStockThreshold: String(product.lowStockThreshold)
     });
@@ -180,20 +200,31 @@ export function ProductsPage() {
             {showForm && !editingId ? "Close Form" : "Add Product"}
           </Button>
         }
-        subtitle="Manage catalog pricing, stock levels, and thresholds."
+        subtitle="Manage catalog pricing, stock levels, thresholds, and product categories."
         title="Products"
       />
 
       <Card>
         <div className="filters-row">
-          <div className="filters-left">
+          <div className="filters-left filters-left-wide">
             <Input label="Search" onChange={(event) => setSearch(event.target.value)} placeholder="Search by product name or SKU" value={search} />
+            <Select label="Category Filter" onChange={(event) => setSelectedCategoryId(event.target.value)} value={selectedCategoryId}>
+              <option value="">All categories</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </Select>
             <label className="checkbox-row">
               <input checked={lowStockOnly} onChange={(event) => setLowStockOnly(event.target.checked)} type="checkbox" />
               <span>Low stock only</span>
             </label>
           </div>
           <div className="filters-right">
+            <Button onClick={() => navigate("/categories")} variant="ghost">
+              Manage Categories
+            </Button>
             <Button onClick={() => void refresh()} variant="secondary">
               Refresh
             </Button>
@@ -229,6 +260,20 @@ export function ProductsPage() {
                 value={form.cost}
               />
               <Input label="SKU" onChange={(event) => setForm((prev) => ({ ...prev, sku: event.target.value }))} value={form.sku} />
+              <Select label="Category" onChange={(event) => setForm((prev) => ({ ...prev, categoryId: event.target.value }))} value={form.categoryId}>
+                <option value="">Uncategorized</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </Select>
+              <div className="form-field category-helper-field">
+                <span className="form-label">Categories</span>
+                <Button onClick={() => navigate("/categories")} variant="secondary">
+                  Open Categories
+                </Button>
+              </div>
               <Input
                 label="Stock Quantity"
                 onChange={(event) => setForm((prev) => ({ ...prev, stockQty: event.target.value }))}
@@ -321,12 +366,12 @@ export function ProductsPage() {
                     </div>
                   }
                   fields={[
-                    { label: "SKU", value: product.sku || "No SKU" },
+                    { label: "Category", value: categoryName(product) },
                     { label: "Price", value: formatMoney(Number(product.price)) },
                     { label: "Stock", value: product.stockQty },
                     { label: "Low Threshold", value: product.lowStockThreshold }
                   ]}
-                  subtitle="Product"
+                  subtitle={product.sku || "No SKU"}
                   title={product.name}
                 />
               ))}

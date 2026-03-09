@@ -89,6 +89,7 @@ model Merchant {
   slug               String             @unique
   phone              String?
   email              String?
+  isActive           Boolean            @default(true)
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   deletedAt          DateTime?
@@ -97,6 +98,7 @@ model Merchant {
   branches           Branch[]
   catalogSettings    CatalogSettings?
   customers          Customer[]
+  categories         Category[]
   deliveries         Delivery[]
   devices            Device[]
   featureFlags       FeatureFlag[]
@@ -308,9 +310,30 @@ model Device {
   @@index([updatedAt])
 }
 
+model Category {
+  id                     String   @id
+  merchantId             String
+  createdByUserId        String?
+  updatedByUserId        String?
+  name                   String
+  createdAt              DateTime
+  updatedAt              DateTime
+  deletedAt              DateTime?
+  version                Int      @default(1)
+  lastModifiedByDeviceId String
+
+  merchant   Merchant   @relation(fields: [merchantId], references: [id])
+  products   Product[]  @relation("ProductCategory")
+
+  @@index([merchantId])
+  @@index([merchantId, name])
+  @@index([updatedAt])
+}
+
 model Product {
   id                     String   @id
   merchantId             String
+  categoryId             String?
   createdByUserId        String?
   updatedByUserId        String?
   name                   String
@@ -330,6 +353,7 @@ model Product {
   lastModifiedByDeviceId String
 
   merchant        Merchant           @relation(fields: [merchantId], references: [id])
+  categoryRef     Category?          @relation("ProductCategory", fields: [categoryId], references: [id])
   createdByUser   User?              @relation("ProductCreatedBy", fields: [createdByUserId], references: [id])
   updatedByUser   User?              @relation("ProductUpdatedBy", fields: [updatedByUserId], references: [id])
   items           OrderItem[]
@@ -339,6 +363,7 @@ model Product {
   kitchenTicketItems KitchenTicketItem[]
 
   @@index([merchantId])
+  @@index([categoryId])
   @@index([createdByUserId])
   @@index([updatedByUserId])
   @@index([updatedAt])

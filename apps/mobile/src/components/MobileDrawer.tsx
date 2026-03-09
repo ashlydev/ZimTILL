@@ -28,7 +28,7 @@ type Props = {
 
 const DRAWER_WIDTH = 312;
 
-export function MobileDrawer({ open, onClose, items, title = "ZimTILL", subtitle = "More pages" }: Props) {
+export function MobileDrawer({ open, onClose, items, title = "Novoriq Stock Plattform", subtitle = "More pages" }: Props) {
   const insets = useSafeAreaInsets();
   const translateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
 

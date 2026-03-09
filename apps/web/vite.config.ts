@@ -16,9 +16,9 @@ export default defineConfig({
       ],
       manifest: {
         id: "/",
-        name: "ZimTILL",
-        short_name: "ZimTILL",
-        description: "Offline-first orders, payments, stock, and catalog management for hardware shops and SMEs.",
+        name: "Novoriq Stock Plattform",
+        short_name: "Novoriq Stock",
+        description: "Novoriq Stock Plattform is an offline-first stock, orders, payments, and reporting platform for Zimbabwean SMEs.",
         prefer_related_applications: false,
         display: "standalone",
         display_override: ["standalone", "minimal-ui", "browser"],

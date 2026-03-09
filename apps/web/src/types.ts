@@ -29,6 +29,7 @@ export type Merchant = {
   slug?: string;
   phone?: string | null;
   email?: string | null;
+  isActive?: boolean;
 };
 
 export type Branch = {
@@ -42,6 +43,11 @@ export type Branch = {
   updatedAt: string;
   stockLines?: number;
   isActive?: boolean;
+};
+
+export type Category = SyncBaseEntity & {
+  id: string;
+  name: string;
 };
 
 export type Plan = {
@@ -89,6 +95,7 @@ export type Product = SyncBaseEntity & {
   price: number;
   cost?: number | null;
   sku?: string | null;
+  categoryId?: string | null;
   category?: string | null;
   stockQty: number;
   lowStockThreshold: number;
@@ -236,18 +243,69 @@ export type FeatureFlag = {
   merchantId: string | null;
 };
 
+export type ReportDay = {
+  date: string;
+  paymentsTotal: number;
+  ordersCount: number;
+  outstandingTotal: number;
+  returnsQty: number;
+  expiredQty: number;
+  damagedQty: number;
+};
+
+export type ReportTopProduct = {
+  productId: string;
+  name: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  qtySold: number;
+  revenue: number;
+  profit: number | null;
+};
+
+export type ReportTopCategory = {
+  categoryId: string | null;
+  name: string;
+  qtySold: number;
+  revenue: number;
+  profit: number | null;
+};
+
 export type ReportsSummary = {
-  salesBasis: string;
+  salesBasis: "PAYMENTS_RECEIVED";
+  ordersCountBasis: "ORDERS_CREATED";
+  generatedAt: string;
   today: {
     salesTotal: number;
     ordersCount: number;
+    outstandingTotal: number;
   };
   last7Days: {
     salesTotal: number;
     ordersCount: number;
-    topProducts: Array<{ productId: string; name: string; qty: number }>;
+    outstandingTotal: number;
+    topProducts: Array<{ productId: string; name: string; categoryId: string | null; categoryName: string | null; qty: number; revenue: number; profit?: number | null }>;
+    topCategories: Array<{ categoryId: string | null; name: string; qty: number; revenue: number; profit?: number | null }>;
   };
-  returnsExpired?: {
+  last30Days: {
+    salesTotal: number;
+    ordersCount: number;
+    outstandingTotal: number;
+    topProducts: Array<{ productId: string; name: string; categoryId: string | null; categoryName: string | null; qty: number; revenue: number; profit?: number | null }>;
+    topCategories: Array<{ categoryId: string | null; name: string; qty: number; revenue: number; profit?: number | null }>;
+  };
+  daily: ReportDay[];
+  topProducts: ReportTopProduct[];
+  topCategories: ReportTopCategory[];
+  lowStock: Array<{
+    productId: string;
+    name: string;
+    categoryId: string | null;
+    categoryName: string | null;
+    stockQty: number;
+    lowStockThreshold: number;
+  }>;
+  returnsExpired: {
     returnsCount: number;
     returnsValue: number;
     expiredCount: number;
@@ -294,6 +352,7 @@ export type BackupPayload = {
   merchant?: Merchant | null;
   data: {
     settings: Settings[];
+    categories?: Category[];
     products: Product[];
     customers: Customer[];
     orders: Order[];

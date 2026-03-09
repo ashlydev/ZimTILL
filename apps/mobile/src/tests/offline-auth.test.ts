@@ -26,7 +26,7 @@ describe("offline auth helpers", () => {
       userId: "user-1",
       identifier: "+263771234567",
       role: "OWNER" as const,
-      businessName: "ZimTILL",
+      businessName: "Novoriq Stock Plattform",
       deviceId: "device-1",
       activeBranchId: "branch-1"
     };
@@ -45,7 +45,7 @@ describe("offline auth helpers", () => {
       userId: "user-1",
       identifier: "cashier@example.com",
       role: "CASHIER" as const,
-      businessName: "ZimTILL",
+      businessName: "Novoriq Stock Plattform",
       deviceId: "device-1",
       activeBranchId: "branch-1"
     };

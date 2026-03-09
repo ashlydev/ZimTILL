@@ -1,4 +1,5 @@
 import type {
+  Category,
   Customer,
   Order,
   OrderItem,
@@ -14,8 +15,8 @@ import { getAuthSnapshot, getDeviceId, getLastPullAt, setSyncMetadata } from "./
 
 export type InventoryAdjustmentReason = "RETURN" | "EXPIRED" | "DAMAGED";
 
-type OfflineEntityType = "product" | "customer" | "order" | "orderItem" | "payment" | "stockMovement" | "settings";
-type OfflineStoreName = "products" | "customers" | "orders" | "orderItems" | "payments" | "stockMovements" | "settings";
+type OfflineEntityType = "category" | "product" | "customer" | "order" | "orderItem" | "payment" | "stockMovement" | "settings";
+type OfflineStoreName = "categories" | "products" | "customers" | "orders" | "orderItems" | "payments" | "stockMovements" | "settings";
 type OutboxOperation = {
   opId: string;
   merchantId: string;
@@ -31,6 +32,7 @@ type OutboxOperation = {
 type SyncPullResponse = {
   serverTime: string;
   changes: {
+    categories?: Category[];
     products?: Product[];
     customers?: Customer[];
     orders?: Order[];
@@ -62,8 +64,14 @@ type SaveProductInput = {
   price: number;
   cost?: number | null;
   sku?: string | null;
+  categoryId?: string | null;
   stockQty: number;
   lowStockThreshold: number;
+};
+
+type SaveCategoryInput = {
+  id?: string;
+  name: string;
 };
 
 type SaveCustomerInput = {
@@ -122,8 +130,8 @@ type ReturnsExpiredSummary = {
 };
 
 const DB_NAME = "zimtill-offline-core";
-const DB_VERSION = 1;
-const STORE_NAMES: OfflineStoreName[] = ["products", "customers", "orders", "orderItems", "payments", "stockMovements", "settings"];
+const DB_VERSION = 2;
+const STORE_NAMES: OfflineStoreName[] = ["categories", "products", "customers", "orders", "orderItems", "payments", "stockMovements", "settings"];
 const ORDER_ACTIVE_STATUSES = ["DRAFT", "SENT", "CONFIRMED", "PARTIALLY_PAID"];
 const MANUAL_PAYMENT_METHODS: PaymentMethod[] = ["CASH", "ECOCASH", "ZIPIT", "BANK_TRANSFER", "OTHER"];
 
@@ -294,7 +302,7 @@ function requireSessionContext(): OfflineSessionContext {
     userId: snapshot.user.id,
     deviceId: getDeviceId(),
     activeBranchId: snapshot.activeBranchId ?? null,
-    businessName: snapshot.merchant.name ?? "ZimTILL"
+    businessName: snapshot.merchant.name ?? "Novoriq Stock Plattform"
   };
 }
 
@@ -350,6 +358,14 @@ async function listStoreRows<T extends { merchantId?: string | null; updatedAt: 
   return rows
     .filter((row) => matchesMerchant(merchantId, row))
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+
+async function getCategoryById(merchantId: string, id: string) {
+  const category = await readById<Category>("categories", id);
+  if (!category || category.merchantId !== merchantId || category.deletedAt) {
+    return null;
+  }
+  return category;
 }
 
 async function getProductById(merchantId: string, id: string) {
@@ -505,10 +521,113 @@ async function createStockMovementRecord(input: {
   return movement;
 }
 
-export async function listProductsLocal(search = "", lowStockOnly = false) {
+export async function listCategoriesLocal() {
+  const { merchantId } = requireSessionContext();
+  return listStoreRows<Category>("categories", merchantId);
+}
+
+export async function saveCategoryLocal(input: SaveCategoryInput) {
+  const context = requireSessionContext();
+  const existing = input.id ? await getCategoryById(context.merchantId, input.id) : null;
+  const now = nowIso();
+  const category: Category = {
+    id: existing?.id ?? input.id ?? makeId("category"),
+    merchantId: context.merchantId,
+    createdByUserId: existing?.createdByUserId ?? context.userId,
+    updatedByUserId: context.userId,
+    name: input.name,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+    deletedAt: null,
+    version: (existing?.version ?? 0) + 1,
+    lastModifiedByDeviceId: context.deviceId
+  };
+
+  await writeOne("categories", category);
+  const products = await listStoreRows<Product>("products", context.merchantId);
+  const affectedProducts = products.filter((product) => product.categoryId === category.id && !product.deletedAt);
+  for (const product of affectedProducts) {
+    const updatedProduct: Product = {
+      ...product,
+      category: category.name,
+      updatedAt: now,
+      updatedByUserId: context.userId,
+      version: product.version + 1,
+      lastModifiedByDeviceId: context.deviceId
+    };
+    await writeOne("products", updatedProduct);
+    await enqueueOperation({
+      merchantId: context.merchantId,
+      entityType: "product",
+      opType: "UPSERT",
+      entityId: updatedProduct.id,
+      payload: updatedProduct,
+      clientUpdatedAt: updatedProduct.updatedAt
+    });
+  }
+  await enqueueOperation({
+    merchantId: context.merchantId,
+    entityType: "category",
+    opType: "UPSERT",
+    entityId: category.id,
+    payload: category
+  });
+
+  return category;
+}
+
+export async function deleteCategoryLocal(categoryId: string) {
+  const context = requireSessionContext();
+  const category = await getCategoryById(context.merchantId, categoryId);
+  if (!category) return;
+
+  const now = nowIso();
+  const next: Category = {
+    ...category,
+    deletedAt: now,
+    updatedAt: now,
+    updatedByUserId: context.userId,
+    version: category.version + 1,
+    lastModifiedByDeviceId: context.deviceId
+  };
+
+  await writeOne("categories", next);
+  const products = await listStoreRows<Product>("products", context.merchantId);
+  const affectedProducts = products.filter((product) => product.categoryId === categoryId && !product.deletedAt);
+  for (const product of affectedProducts) {
+    const updatedProduct: Product = {
+      ...product,
+      categoryId: null,
+      updatedAt: now,
+      updatedByUserId: context.userId,
+      version: product.version + 1,
+      lastModifiedByDeviceId: context.deviceId
+    };
+    await writeOne("products", updatedProduct);
+    await enqueueOperation({
+      merchantId: context.merchantId,
+      entityType: "product",
+      opType: "UPSERT",
+      entityId: updatedProduct.id,
+      payload: updatedProduct,
+      clientUpdatedAt: updatedProduct.updatedAt
+    });
+  }
+  await enqueueOperation({
+    merchantId: context.merchantId,
+    entityType: "category",
+    opType: "DELETE",
+    entityId: categoryId,
+    payload: next,
+    clientUpdatedAt: next.updatedAt
+  });
+}
+
+export async function listProductsLocal(search = "", lowStockOnly = false, categoryId = "") {
   const { merchantId } = requireSessionContext();
   const products = await listStoreRows<Product>("products", merchantId);
   const filtered = products.filter((product) => {
+    if (categoryId && product.categoryId !== categoryId) return false;
     if (!search.trim()) return true;
     return searchContains(product.name, search) || searchContains(product.sku, search);
   });
@@ -523,6 +642,8 @@ export async function listProductsLocal(search = "", lowStockOnly = false) {
 export async function saveProductLocal(input: SaveProductInput) {
   const context = requireSessionContext();
   const existing = input.id ? await getProductById(context.merchantId, input.id) : null;
+  const nextCategoryId = input.categoryId !== undefined ? input.categoryId ?? null : existing?.categoryId ?? null;
+  const category = nextCategoryId ? await getCategoryById(context.merchantId, nextCategoryId) : null;
   const now = nowIso();
 
   const product: Product = {
@@ -534,7 +655,8 @@ export async function saveProductLocal(input: SaveProductInput) {
     price: Number(input.price),
     cost: input.cost ?? existing?.cost ?? null,
     sku: input.sku ?? existing?.sku ?? null,
-    category: existing?.category ?? null,
+    categoryId: nextCategoryId,
+    category: nextCategoryId ? category?.name ?? existing?.category ?? null : null,
     stockQty: Number(input.stockQty),
     lowStockThreshold: Number(input.lowStockThreshold),
     branchStockQty: context.activeBranchId ? Number(input.stockQty) : undefined,
@@ -598,6 +720,7 @@ export async function adjustStockLocal(productId: string, quantity: number, reas
     price: Number(product.price),
     cost: product.cost ?? null,
     sku: product.sku ?? null,
+    categoryId: product.categoryId ?? null,
     stockQty: Number(product.stockQty) + Number(quantity),
     lowStockThreshold: Number(product.lowStockThreshold)
   });
@@ -631,6 +754,7 @@ export async function recordInventoryAdjustmentLocal(input: RecordInventoryAdjus
     price: Number(product.price),
     cost: product.cost ?? null,
     sku: product.sku ?? null,
+    categoryId: product.categoryId ?? null,
     stockQty: Number(product.stockQty) + signedQuantity,
     lowStockThreshold: Number(product.lowStockThreshold)
   });
@@ -941,6 +1065,7 @@ export async function confirmOrderLocal(orderId: string) {
       price: Number(product.price),
       cost: product.cost ?? null,
       sku: product.sku ?? null,
+      categoryId: product.categoryId ?? null,
       stockQty: Number(product.stockQty) - Number(item.quantity),
       lowStockThreshold: Number(product.lowStockThreshold)
     });
@@ -997,6 +1122,7 @@ export async function cancelOrderLocal(orderId: string) {
         price: Number(product.price),
         cost: product.cost ?? null,
         sku: product.sku ?? null,
+        categoryId: product.categoryId ?? null,
         stockQty: Number(product.stockQty) + Number(item.quantity),
         lowStockThreshold: Number(product.lowStockThreshold)
       });
@@ -1083,44 +1209,10 @@ function inRange(isoValue: string, since: Date) {
   return new Date(isoValue).getTime() >= since.getTime();
 }
 
-function buildReturnsExpiredSummary(movements: Array<StockMovement & { product?: Product | null }>, since: Date): ReturnsExpiredSummary {
-  const summary: ReturnsExpiredSummary = {
-    returnsCount: 0,
-    returnsValue: 0,
-    expiredCount: 0,
-    expiredValue: 0,
-    damagedCount: 0,
-    damagedValue: 0
-  };
-
-  for (const movement of movements) {
-    if (!inRange(movement.createdAt, since)) continue;
-    const reason = parseAdjustmentReason(movement.reason);
-    if (!reason) continue;
-    const value = Math.abs(Number(movement.quantity)) * Number(movement.product?.price ?? 0);
-
-    if (reason === "RETURN") {
-      summary.returnsCount += Math.abs(Number(movement.quantity));
-      summary.returnsValue += value;
-      continue;
-    }
-
-    if (reason === "EXPIRED") {
-      summary.expiredCount += Math.abs(Number(movement.quantity));
-      summary.expiredValue += value;
-      continue;
-    }
-
-    summary.damagedCount += Math.abs(Number(movement.quantity));
-    summary.damagedValue += value;
-  }
-
-  return summary;
-}
-
 export async function getReportsLocal(): Promise<ReportsSummary> {
   const context = requireSessionContext();
-  const [payments, orders, items, products, movements] = await Promise.all([
+  const [categories, payments, orders, items, products, movements] = await Promise.all([
+    listCategoriesLocal(),
     listStoreRows<Payment>("payments", context.merchantId),
     listStoreRows<Order>("orders", context.merchantId),
     listStoreRows<OrderItem>("orderItems", context.merchantId),
@@ -1132,7 +1224,18 @@ export async function getReportsLocal(): Promise<ReportsSummary> {
   todayStart.setHours(0, 0, 0, 0);
   const sevenDaysAgo = new Date(todayStart);
   sevenDaysAgo.setDate(todayStart.getDate() - 6);
-  const productById = new Map(products.map((product) => [product.id, product]));
+  const thirtyDaysAgo = new Date(todayStart);
+  thirtyDaysAgo.setDate(todayStart.getDate() - 29);
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
+  const productById = new Map(
+    products.map((product) => [
+      product.id,
+      {
+        ...product,
+        categoryName: product.categoryId ? categoryById.get(product.categoryId)?.name ?? product.category ?? null : product.category ?? null
+      }
+    ])
+  );
 
   const filteredPayments = payments.filter((payment) => (!context.activeBranchId || payment.branchId === context.activeBranchId) && payment.status === "CONFIRMED");
   const filteredOrders = orders.filter((order) => !context.activeBranchId || order.branchId === context.activeBranchId);
@@ -1140,40 +1243,225 @@ export async function getReportsLocal(): Promise<ReportsSummary> {
     const order = filteredOrders.find((candidate) => candidate.id === item.orderId);
     return Boolean(order);
   });
-
-  const todaySales = filteredPayments.filter((payment) => inRange(payment.paidAt, todayStart)).reduce((sum, payment) => sum + Number(payment.amount), 0);
-  const weekSales = filteredPayments.filter((payment) => inRange(payment.paidAt, sevenDaysAgo)).reduce((sum, payment) => sum + Number(payment.amount), 0);
-  const todayOrders = filteredOrders.filter((order) => inRange(order.createdAt, todayStart)).length;
-  const weekOrders = filteredOrders.filter((order) => inRange(order.createdAt, sevenDaysAgo)).length;
-
-  const topProductMap = new Map<string, { productId: string; name: string; qty: number }>();
-  for (const item of filteredItems) {
-    if (!inRange(item.createdAt, sevenDaysAgo)) continue;
-    const product = productById.get(item.productId);
-      const current = topProductMap.get(item.productId) ?? {
-        productId: item.productId,
-        name: product?.name ?? "Unavailable product",
-        qty: 0
-      };
-    current.qty += Number(item.quantity);
-    topProductMap.set(item.productId, current);
+  const filteredMovements = movements.filter((movement) => !context.activeBranchId || movement.branchId === context.activeBranchId);
+  const paymentsByOrderId = new Map<string, number>();
+  for (const payment of filteredPayments) {
+    paymentsByOrderId.set(payment.orderId, (paymentsByOrderId.get(payment.orderId) ?? 0) + Number(payment.amount));
   }
 
+  const buildDaily = () => {
+    const rows: ReportsSummary["daily"] = [];
+    for (let offset = 0; offset < 30; offset += 1) {
+      const dayStart = new Date(thirtyDaysAgo);
+      dayStart.setDate(thirtyDaysAgo.getDate() + offset);
+      const nextDay = new Date(dayStart);
+      nextDay.setDate(dayStart.getDate() + 1);
+      const date = dayStart.toISOString().slice(0, 10);
+
+      const paymentsTotal = filteredPayments
+        .filter((payment) => new Date(payment.paidAt) >= dayStart && new Date(payment.paidAt) < nextDay)
+        .reduce((sum, payment) => sum + Number(payment.amount), 0);
+      const ordersCount = filteredOrders.filter((order) => new Date(order.createdAt) >= dayStart && new Date(order.createdAt) < nextDay).length;
+      const outstandingTotal = filteredOrders.reduce((sum, order) => {
+        if (new Date(order.createdAt) >= nextDay || order.status === "CANCELLED") {
+          return sum;
+        }
+        const paid = filteredPayments
+          .filter((payment) => payment.orderId === order.id && new Date(payment.paidAt) < nextDay)
+          .reduce((running, payment) => running + Number(payment.amount), 0);
+        const balance = Math.max(Number(order.total) - paid, 0);
+        if (!ORDER_ACTIVE_STATUSES.includes(order.status) && balance <= 0) {
+          return sum;
+        }
+        return sum + balance;
+      }, 0);
+
+      const movementTotals = filteredMovements.reduce(
+        (summary, movement) => {
+          if (movement.createdAt.slice(0, 10) !== date) return summary;
+          const reason = parseAdjustmentReason(movement.reason);
+          if (!reason) return summary;
+          const qty = Math.abs(Number(movement.quantity));
+          if (reason === "RETURN") summary.returnsQty += qty;
+          if (reason === "EXPIRED") summary.expiredQty += qty;
+          if (reason === "DAMAGED") summary.damagedQty += qty;
+          return summary;
+        },
+        { returnsQty: 0, expiredQty: 0, damagedQty: 0 }
+      );
+
+      rows.push({
+        date,
+        paymentsTotal,
+        ordersCount,
+        outstandingTotal,
+        returnsQty: movementTotals.returnsQty,
+        expiredQty: movementTotals.expiredQty,
+        damagedQty: movementTotals.damagedQty
+      });
+    }
+    return rows;
+  };
+
+  const buildWindowSummary = (since: Date) => {
+    const windowOrders = filteredOrders.filter((order) => inRange(order.createdAt, since));
+    const windowOrderIds = new Set(windowOrders.filter((order) => ["CONFIRMED", "PARTIALLY_PAID", "PAID"].includes(order.status)).map((order) => order.id));
+    const salesTotal = filteredPayments.filter((payment) => inRange(payment.paidAt, since)).reduce((sum, payment) => sum + Number(payment.amount), 0);
+    const ordersCount = windowOrders.length;
+    const outstandingTotal = windowOrders.reduce((sum, order) => {
+      if (order.status === "CANCELLED") return sum;
+      const paid = paymentsByOrderId.get(order.id) ?? 0;
+      return sum + Math.max(Number(order.total) - paid, 0);
+    }, 0);
+    const byProduct = new Map<string, { productId: string; name: string; categoryId: string | null; categoryName: string | null; qty: number; revenue: number; profit: number | null }>();
+    const byCategory = new Map<string, { categoryId: string | null; name: string; qty: number; revenue: number; profit: number | null }>();
+
+    for (const item of filteredItems) {
+      if (!windowOrderIds.has(item.orderId)) continue;
+      const product = productById.get(item.productId);
+      const qty = Number(item.quantity);
+      const revenue = Number(item.lineTotal);
+      const productEntry = byProduct.get(item.productId) ?? {
+        productId: item.productId,
+        name: product?.name ?? "Unavailable product",
+        categoryId: product?.categoryId ?? null,
+        categoryName: product?.categoryName ?? null,
+        qty: 0,
+        revenue: 0,
+        profit: product?.cost == null ? null : 0
+      };
+      productEntry.qty += qty;
+      productEntry.revenue += revenue;
+      if (productEntry.profit != null && product?.cost != null) {
+        productEntry.profit += revenue - Number(product.cost) * qty;
+      }
+      byProduct.set(item.productId, productEntry);
+
+      const categoryKey = product?.categoryId ?? `name:${product?.categoryName ?? "uncategorized"}`;
+      const categoryEntry = byCategory.get(categoryKey) ?? {
+        categoryId: product?.categoryId ?? null,
+        name: product?.categoryName ?? "Uncategorized",
+        qty: 0,
+        revenue: 0,
+        profit: product?.cost == null ? null : 0
+      };
+      categoryEntry.qty += qty;
+      categoryEntry.revenue += revenue;
+      if (categoryEntry.profit != null && product?.cost != null) {
+        categoryEntry.profit += revenue - Number(product.cost) * qty;
+      }
+      byCategory.set(categoryKey, categoryEntry);
+    }
+
+    return {
+      salesTotal,
+      ordersCount,
+      outstandingTotal,
+      topProducts: [...byProduct.values()].sort((left, right) => right.revenue - left.revenue || right.qty - left.qty).slice(0, 10),
+      topCategories: [...byCategory.values()].sort((left, right) => right.revenue - left.revenue || right.qty - left.qty).slice(0, 10)
+    };
+  };
+
+  const topProductRows = new Map<string, ReportsSummary["topProducts"][number]>();
+  for (const item of filteredItems) {
+    const order = filteredOrders.find((candidate) => candidate.id === item.orderId);
+    if (!order || !inRange(order.createdAt, thirtyDaysAgo) || !["CONFIRMED", "PARTIALLY_PAID", "PAID"].includes(order.status)) {
+      continue;
+    }
+    const product = productById.get(item.productId);
+    const current = topProductRows.get(item.productId) ?? {
+      productId: item.productId,
+      name: product?.name ?? "Unavailable product",
+      categoryId: product?.categoryId ?? null,
+      categoryName: product?.categoryName ?? null,
+      qtySold: 0,
+      revenue: 0,
+      profit: product?.cost == null ? null : 0
+    };
+    const qty = Number(item.quantity);
+    const revenue = Number(item.lineTotal);
+    current.qtySold += qty;
+    current.revenue += revenue;
+    if (current.profit != null && product?.cost != null) {
+      current.profit += revenue - Number(product.cost) * qty;
+    }
+    topProductRows.set(item.productId, current);
+  }
+
+  const topCategoryRows = new Map<string, ReportsSummary["topCategories"][number]>();
+  for (const item of topProductRows.values()) {
+    const key = item.categoryId ?? `name:${item.categoryName ?? "uncategorized"}`;
+    const current = topCategoryRows.get(key) ?? {
+      categoryId: item.categoryId,
+      name: item.categoryName ?? "Uncategorized",
+      qtySold: 0,
+      revenue: 0,
+      profit: item.profit == null ? null : 0
+    };
+    current.qtySold += item.qtySold;
+    current.revenue += item.revenue;
+    if (current.profit != null && item.profit != null) {
+      current.profit += item.profit;
+    }
+    topCategoryRows.set(key, current);
+  }
+
+  const returnsExpired = filteredMovements.reduce<ReturnsExpiredSummary>(
+    (summary, movement) => {
+      if (!inRange(movement.createdAt, thirtyDaysAgo)) return summary;
+      const reason = parseAdjustmentReason(movement.reason);
+      if (!reason) return summary;
+      const product = productById.get(movement.productId);
+      const quantity = Math.abs(Number(movement.quantity));
+      const value = quantity * Number(product?.price ?? 0);
+      if (reason === "RETURN") {
+        summary.returnsCount += quantity;
+        summary.returnsValue += value;
+      }
+      if (reason === "EXPIRED") {
+        summary.expiredCount += quantity;
+        summary.expiredValue += value;
+      }
+      if (reason === "DAMAGED") {
+        summary.damagedCount += quantity;
+        summary.damagedValue += value;
+      }
+      return summary;
+    },
+    {
+      returnsCount: 0,
+      returnsValue: 0,
+      expiredCount: 0,
+      expiredValue: 0,
+      damagedCount: 0,
+      damagedValue: 0
+    }
+  );
+
+  const lowStock = products
+    .filter((product) => Number(product.stockQty) <= Number(product.lowStockThreshold))
+    .map((product) => ({
+      productId: product.id,
+      name: product.name,
+      categoryId: product.categoryId ?? null,
+      categoryName: product.categoryId ? categoryById.get(product.categoryId)?.name ?? product.category ?? null : product.category ?? null,
+      stockQty: Number(product.stockQty),
+      lowStockThreshold: Number(product.lowStockThreshold)
+    }))
+    .sort((left, right) => left.stockQty - right.stockQty || left.name.localeCompare(right.name));
+
   return {
-    salesBasis: "CONFIRMED_PAYMENTS",
-    today: {
-      salesTotal: todaySales,
-      ordersCount: todayOrders
-    },
-    last7Days: {
-      salesTotal: weekSales,
-      ordersCount: weekOrders,
-      topProducts: [...topProductMap.values()].sort((a, b) => b.qty - a.qty).slice(0, 5)
-    },
-    returnsExpired: buildReturnsExpiredSummary(
-      movements.map((movement) => ({ ...movement, product: movement.product ?? null })),
-      sevenDaysAgo
-    )
+    salesBasis: "PAYMENTS_RECEIVED",
+    ordersCountBasis: "ORDERS_CREATED",
+    generatedAt: nowIso(),
+    today: buildWindowSummary(todayStart),
+    last7Days: buildWindowSummary(sevenDaysAgo),
+    last30Days: buildWindowSummary(thirtyDaysAgo),
+    daily: buildDaily(),
+    topProducts: [...topProductRows.values()].sort((left, right) => right.revenue - left.revenue || right.qtySold - left.qtySold).slice(0, 10),
+    topCategories: [...topCategoryRows.values()].sort((left, right) => right.revenue - left.revenue || right.qtySold - left.qtySold).slice(0, 10),
+    lowStock,
+    returnsExpired
   };
 }
 
@@ -1333,6 +1621,7 @@ async function pullChanges(token: string, merchantId: string) {
 
   const result = (await response.json()) as SyncPullResponse;
 
+  await mergeServerCollection("categories", result.changes.categories ?? []);
   await mergeServerCollection("products", result.changes.products ?? []);
   await mergeServerCollection("customers", result.changes.customers ?? []);
   await mergeServerCollection("orders", result.changes.orders ?? []);
@@ -1348,6 +1637,7 @@ async function pullChanges(token: string, merchantId: string) {
   });
 
   const pulledCount =
+    (result.changes.categories?.length ?? 0) +
     (result.changes.products?.length ?? 0) +
     (result.changes.customers?.length ?? 0) +
     (result.changes.orders?.length ?? 0) +
@@ -1405,6 +1695,11 @@ export async function syncOfflineCore(token: string, merchantId: string) {
   })();
 
   return syncPromise;
+}
+
+export async function getPendingOutboxCount(merchantId: string) {
+  const operations = await readAll<OutboxOperation>("outbox");
+  return operations.filter((operation) => operation.merchantId === merchantId).length;
 }
 
 export async function hydrateOfflineCore(token: string, merchantId: string) {

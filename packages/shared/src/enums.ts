@@ -44,6 +44,7 @@ export type Role = (typeof roleValues)[number];
 
 export const syncEntityTypeValues = [
   "branch",
+  "category",
   "product",
   "productStock",
   "customer",

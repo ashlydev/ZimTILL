@@ -9,8 +9,14 @@ type SaveProductInput = {
   price: number;
   cost?: number | null;
   sku?: string | null;
+  categoryId?: string | null;
   stockQty: number;
   lowStockThreshold: number;
+};
+
+type SaveCategoryInput = {
+  id?: string;
+  name: string;
 };
 
 type SaveCustomerInput = {
@@ -71,6 +77,23 @@ type SyncState = {
   last_push_at: string | null;
   last_error: string | null;
   device_id: string;
+};
+
+type LocalCategoryRow = Record<string, unknown> & {
+  id: string;
+  name: string;
+};
+
+type LocalProductRow = Record<string, unknown> & {
+  id: string;
+  name: string;
+  categoryId?: string | null;
+  category?: string | null;
+  categoryName?: string | null;
+  price?: number;
+  cost?: number | null;
+  stockQty?: number;
+  lowStockThreshold?: number;
 };
 
 function nowIso(): string {
@@ -241,15 +264,116 @@ async function getProductById(merchantId: string, id: string): Promise<Record<st
   return row ? toCamel(row) : null;
 }
 
-export async function listProducts(merchantId: string, search = "", lowStockOnly = false): Promise<Record<string, unknown>[]> {
+async function getCategoryById(merchantId: string, id: string): Promise<Record<string, unknown> | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<Record<string, unknown>>(
+    "SELECT * FROM categories WHERE merchant_id = ? AND id = ? AND deleted_at IS NULL;",
+    [merchantId, id]
+  );
+  return row ? toCamel(row) : null;
+}
+
+export async function listCategories(merchantId: string): Promise<Record<string, unknown>[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<Record<string, unknown>>(
+    `SELECT * FROM categories
+     WHERE merchant_id = ? AND deleted_at IS NULL
+     ORDER BY name COLLATE NOCASE ASC, updated_at DESC;`,
+    [merchantId]
+  );
+
+  return rows.map((row) => toCamel(row));
+}
+
+export async function saveCategory(context: SessionContext, input: SaveCategoryInput): Promise<Record<string, unknown>> {
+  const db = await getDb();
+  const id = input.id ?? generateId();
+  const existing = await db.getFirstAsync<{ version: number }>(
+    "SELECT version FROM categories WHERE merchant_id = ? AND id = ?;",
+    [context.merchantId, id]
+  );
+  const version = existing ? existing.version + 1 : 1;
+  const now = nowIso();
+
+  await db.runAsync(
+    `INSERT INTO categories (
+      id, merchant_id, created_by_user_id, updated_by_user_id, name, created_at, updated_at, deleted_at, version, last_modified_by_device_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      updated_by_user_id = excluded.updated_by_user_id,
+      name = excluded.name,
+      updated_at = excluded.updated_at,
+      deleted_at = NULL,
+      version = excluded.version,
+      last_modified_by_device_id = excluded.last_modified_by_device_id;`,
+    [id, context.merchantId, context.userId, context.userId, input.name, now, now, version, context.deviceId]
+  );
+
+  const category = (await getCategoryById(context.merchantId, id))!;
+  const categoryName = typeof category.name === "string" ? category.name : input.name;
+
+  await db.runAsync(
+    `UPDATE products
+     SET category = ?, updated_at = ?, updated_by_user_id = ?, version = version + 1, last_modified_by_device_id = ?
+     WHERE merchant_id = ? AND category_id = ? AND deleted_at IS NULL;`,
+    [categoryName, now, context.userId, context.deviceId, context.merchantId, id]
+  );
+
+  const affectedProducts = await db.getAllAsync<Record<string, unknown>>(
+    "SELECT * FROM products WHERE merchant_id = ? AND category_id = ? AND deleted_at IS NULL;",
+    [context.merchantId, id]
+  );
+  for (const row of affectedProducts) {
+    await enqueue(context, "product", String(row.id), "UPSERT", toCamel(row));
+  }
+
+  await enqueue(context, "category", id, "UPSERT", category);
+  return category;
+}
+
+export async function deleteCategory(context: SessionContext, categoryId: string): Promise<void> {
+  const db = await getDb();
+  const now = nowIso();
+  await db.runAsync(
+    `UPDATE categories
+     SET deleted_at = ?, updated_at = ?, updated_by_user_id = ?, version = version + 1, last_modified_by_device_id = ?
+     WHERE merchant_id = ? AND id = ?;`,
+    [now, now, context.userId, context.deviceId, context.merchantId, categoryId]
+  );
+
+  await db.runAsync(
+    `UPDATE products
+     SET category_id = NULL, updated_at = ?, updated_by_user_id = ?, version = version + 1, last_modified_by_device_id = ?
+     WHERE merchant_id = ? AND category_id = ? AND deleted_at IS NULL;`,
+    [now, context.userId, context.deviceId, context.merchantId, categoryId]
+  );
+
+  const [category, products] = await Promise.all([
+    db.getFirstAsync<Record<string, unknown>>("SELECT * FROM categories WHERE merchant_id = ? AND id = ?;", [context.merchantId, categoryId]),
+    db.getAllAsync<Record<string, unknown>>(
+      "SELECT * FROM products WHERE merchant_id = ? AND deleted_at IS NULL AND category_id IS NULL AND updated_at = ?;",
+      [context.merchantId, now]
+    )
+  ]);
+
+  if (category) {
+    await enqueue(context, "category", categoryId, "DELETE", toCamel(category));
+  }
+  for (const row of products) {
+    await enqueue(context, "product", String(row.id), "UPSERT", toCamel(row));
+  }
+}
+
+export async function listProducts(merchantId: string, search = "", lowStockOnly = false, categoryId = ""): Promise<Record<string, unknown>[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<Record<string, unknown>>(
     `SELECT * FROM products
      WHERE merchant_id = ?
        AND deleted_at IS NULL
+       AND (? = '' OR category_id = ?)
        AND (? = '' OR LOWER(name) LIKE '%' || LOWER(?) || '%' OR LOWER(COALESCE(sku, '')) LIKE '%' || LOWER(?) || '%')
      ORDER BY updated_at DESC;`,
-    [merchantId, search, search, search]
+    [merchantId, categoryId, categoryId, search, search, search]
   );
 
   const mapped = rows.map((row) => toCamel(row));
@@ -267,18 +391,24 @@ export async function saveProduct(context: SessionContext, input: SaveProductInp
 
   const version = existing ? existing.version + 1 : 1;
   const now = nowIso();
+  const current = (await getProductById(context.merchantId, id)) as LocalProductRow | null;
+  const nextCategoryId = input.categoryId !== undefined ? input.categoryId ?? null : typeof current?.categoryId === "string" ? current.categoryId : null;
+  const category = nextCategoryId ? await getCategoryById(context.merchantId, nextCategoryId) : null;
+  const nextCategoryName = category && typeof category.name === "string" ? category.name : null;
 
   await db.runAsync(
     `INSERT INTO products (
-      id, merchant_id, created_by_user_id, updated_by_user_id, name, price, cost, sku, stock_qty, low_stock_threshold,
+      id, merchant_id, created_by_user_id, updated_by_user_id, name, price, cost, sku, category_id, category, stock_qty, low_stock_threshold,
       created_at, updated_at, deleted_at, version, last_modified_by_device_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       updated_by_user_id = excluded.updated_by_user_id,
       name = excluded.name,
       price = excluded.price,
       cost = excluded.cost,
       sku = excluded.sku,
+      category_id = excluded.category_id,
+      category = excluded.category,
       stock_qty = excluded.stock_qty,
       low_stock_threshold = excluded.low_stock_threshold,
       updated_at = excluded.updated_at,
@@ -294,6 +424,8 @@ export async function saveProduct(context: SessionContext, input: SaveProductInp
       input.price,
       input.cost ?? null,
       input.sku ?? null,
+      nextCategoryId,
+      nextCategoryName,
       input.stockQty,
       input.lowStockThreshold,
       now,
@@ -342,6 +474,7 @@ export async function adjustStock(
     price: Number(product.price),
     cost: product.cost === null ? null : Number(product.cost),
     sku: product.sku ? String(product.sku) : null,
+    categoryId: product.categoryId ? String(product.categoryId) : null,
     stockQty: nextQty,
     lowStockThreshold: Number(product.lowStockThreshold)
   });
@@ -390,6 +523,7 @@ export async function recordInventoryAdjustment(
     price: Number(product.price),
     cost: product.cost === null ? null : Number(product.cost),
     sku: product.sku ? String(product.sku) : null,
+    categoryId: product.categoryId ? String(product.categoryId) : null,
     stockQty: Number(product.stockQty) + signedQuantity,
     lowStockThreshold: Number(product.lowStockThreshold)
   });
@@ -787,6 +921,7 @@ export async function confirmOrder(context: SessionContext, orderId: string): Pr
       price: Number(product.price),
       cost: product.cost === null ? null : Number(product.cost),
       sku: product.sku ? String(product.sku) : null,
+      categoryId: product.categoryId ? String(product.categoryId) : null,
       stockQty: Number(product.stockQty) - Number(item.quantity),
       lowStockThreshold: Number(product.lowStockThreshold)
     });
@@ -837,6 +972,7 @@ export async function cancelOrder(context: SessionContext, orderId: string): Pro
         price: Number(product.price),
         cost: product.cost === null ? null : Number(product.cost),
         sku: product.sku ? String(product.sku) : null,
+        categoryId: product.categoryId ? String(product.categoryId) : null,
         stockQty: Number(product.stockQty) + Number(item.quantity),
         lowStockThreshold: Number(product.lowStockThreshold)
       });
@@ -1003,9 +1139,57 @@ export async function getDashboardStats(merchantId: string): Promise<{
 }
 
 export async function getReports(merchantId: string): Promise<{
-  salesBasis: string;
-  today: { salesTotal: number; ordersCount: number };
-  last7Days: { salesTotal: number; ordersCount: number; topProducts: Array<{ productId: string; name: string; qty: number }> };
+  salesBasis: "PAYMENTS_RECEIVED";
+  ordersCountBasis: "ORDERS_CREATED";
+  generatedAt: string;
+  today: { salesTotal: number; ordersCount: number; outstandingTotal: number };
+  last7Days: {
+    salesTotal: number;
+    ordersCount: number;
+    outstandingTotal: number;
+    topProducts: Array<{ productId: string; name: string; categoryName: string | null; qty: number; revenue: number }>;
+    topCategories: Array<{ categoryId: string | null; name: string; qty: number; revenue: number }>;
+  };
+  last30Days: {
+    salesTotal: number;
+    ordersCount: number;
+    outstandingTotal: number;
+    topProducts: Array<{ productId: string; name: string; categoryName: string | null; qty: number; revenue: number }>;
+    topCategories: Array<{ categoryId: string | null; name: string; qty: number; revenue: number }>;
+  };
+  daily: Array<{
+    date: string;
+    paymentsTotal: number;
+    ordersCount: number;
+    outstandingTotal: number;
+    returnsQty: number;
+    expiredQty: number;
+    damagedQty: number;
+  }>;
+  topProducts: Array<{
+    productId: string;
+    name: string;
+    categoryId: string | null;
+    categoryName: string | null;
+    qtySold: number;
+    revenue: number;
+    profit: number | null;
+  }>;
+  topCategories: Array<{
+    categoryId: string | null;
+    name: string;
+    qtySold: number;
+    revenue: number;
+    profit: number | null;
+  }>;
+  lowStock: Array<{
+    productId: string;
+    name: string;
+    categoryId: string | null;
+    categoryName: string | null;
+    stockQty: number;
+    lowStockThreshold: number;
+  }>;
   returnsExpired: {
     returnsCount: number;
     returnsValue: number;
@@ -1020,93 +1204,253 @@ export async function getReports(merchantId: string): Promise<{
   today.setHours(0, 0, 0, 0);
   const sevenDaysAgo = new Date(today);
   sevenDaysAgo.setDate(today.getDate() - 6);
+  const thirtyDaysAgo = new Date(today);
+  thirtyDaysAgo.setDate(today.getDate() - 29);
 
-  const [todaySales, weekSales, todayOrders, weekOrders, topRows, movementRows] = await Promise.all([
-    db.getFirstAsync<{ total: number }>(
-      `SELECT COALESCE(SUM(amount), 0) as total FROM payments
-       WHERE merchant_id = ? AND deleted_at IS NULL AND status = 'CONFIRMED' AND paid_at >= ?;`,
-      [merchantId, today.toISOString()]
-    ),
-    db.getFirstAsync<{ total: number }>(
-      `SELECT COALESCE(SUM(amount), 0) as total FROM payments
-       WHERE merchant_id = ? AND deleted_at IS NULL AND status = 'CONFIRMED' AND paid_at >= ?;`,
-      [merchantId, sevenDaysAgo.toISOString()]
-    ),
-    db.getFirstAsync<{ count: number }>(
-      `SELECT COUNT(*) as count FROM orders
-       WHERE merchant_id = ? AND deleted_at IS NULL AND created_at >= ?;`,
-      [merchantId, today.toISOString()]
-    ),
-    db.getFirstAsync<{ count: number }>(
-      `SELECT COUNT(*) as count FROM orders
-       WHERE merchant_id = ? AND deleted_at IS NULL AND created_at >= ?;`,
-      [merchantId, sevenDaysAgo.toISOString()]
-    ),
-    db.getAllAsync<{ product_id: string; product_name: string; qty: number }>(
-      `SELECT oi.product_id, p.name as product_name, SUM(oi.quantity) as qty
-       FROM order_items oi
-       JOIN products p ON p.id = oi.product_id
-       WHERE oi.merchant_id = ? AND oi.deleted_at IS NULL AND oi.created_at >= ?
-      GROUP BY oi.product_id, p.name
-      ORDER BY qty DESC
-      LIMIT 5;`,
-      [merchantId, sevenDaysAgo.toISOString()]
-    ),
-    db.getAllAsync<{ quantity: number; reason: string | null; price: number | null; created_at: string }>(
-      `SELECT sm.quantity, sm.reason, p.price, sm.created_at
-       FROM stock_movements sm
-       JOIN products p ON p.id = sm.product_id
-       WHERE sm.merchant_id = ? AND sm.deleted_at IS NULL AND sm.created_at >= ?;`,
-      [merchantId, sevenDaysAgo.toISOString()]
-    )
+  const [categories, products, orders, orderItems, payments, movements] = await Promise.all([
+    listCategories(merchantId),
+    listProducts(merchantId),
+    listOrders(merchantId),
+    db.getAllAsync<Record<string, unknown>>(
+      "SELECT * FROM order_items WHERE merchant_id = ? AND deleted_at IS NULL ORDER BY created_at ASC;",
+      [merchantId]
+    ).then((rows) => rows.map((row) => toCamel(row))),
+    listPayments(merchantId),
+    listStockMovements(merchantId)
   ]);
 
-  const returnsExpired = {
-    returnsCount: 0,
-    returnsValue: 0,
-    expiredCount: 0,
-    expiredValue: 0,
-    damagedCount: 0,
-    damagedValue: 0
-  };
-
-  for (const row of movementRows) {
-    const type = parseAdjustmentReason(row.reason);
-    if (!type) continue;
-    const quantity = Math.abs(Number(row.quantity));
-    const value = quantity * Number(row.price ?? 0);
-
-    if (type === "RETURN") {
-      returnsExpired.returnsCount += quantity;
-      returnsExpired.returnsValue += value;
-      continue;
-    }
-
-    if (type === "EXPIRED") {
-      returnsExpired.expiredCount += quantity;
-      returnsExpired.expiredValue += value;
-      continue;
-    }
-
-    returnsExpired.damagedCount += quantity;
-    returnsExpired.damagedValue += value;
+  const categoryById = new Map<string, LocalCategoryRow>(categories.map((category) => [String(category.id), category as LocalCategoryRow]));
+  const productById = new Map<string, LocalProductRow>(
+    products.map((product) => [
+      String(product.id),
+      {
+        ...(product as LocalProductRow),
+        categoryName:
+          product.categoryId && typeof product.categoryId === "string"
+            ? String(categoryById.get(product.categoryId)?.name ?? product.category ?? "Uncategorized")
+            : String(product.category ?? "Uncategorized")
+      }
+    ])
+  );
+  const paymentsByOrderId = new Map<string, number>();
+  for (const payment of payments) {
+    if (String(payment.status) !== "CONFIRMED") continue;
+    const key = String(payment.orderId);
+    paymentsByOrderId.set(key, (paymentsByOrderId.get(key) ?? 0) + Number(payment.amount));
   }
 
+  const buildWindowSummary = (since: Date) => {
+    const windowOrders = orders.filter((order) => new Date(String(order.createdAt)) >= since);
+    const salesTotal = payments
+      .filter((payment) => String(payment.status) === "CONFIRMED" && new Date(String(payment.paidAt)) >= since)
+      .reduce((sum, payment) => sum + Number(payment.amount), 0);
+    const outstandingTotal = windowOrders.reduce((sum, order) => {
+      if (String(order.status) === "CANCELLED") return sum;
+      return sum + Math.max(Number(order.total) - (paymentsByOrderId.get(String(order.id)) ?? 0), 0);
+    }, 0);
+
+    const confirmedOrderIds = new Set(
+      windowOrders.filter((order) => ["CONFIRMED", "PARTIALLY_PAID", "PAID"].includes(String(order.status))).map((order) => String(order.id))
+    );
+    const topProductsMap = new Map<string, { productId: string; name: string; categoryName: string | null; qty: number; revenue: number }>();
+    const topCategoriesMap = new Map<string, { categoryId: string | null; name: string; qty: number; revenue: number }>();
+
+    for (const item of orderItems) {
+      if (!confirmedOrderIds.has(String(item.orderId))) continue;
+      const product = productById.get(String(item.productId));
+      const qty = Number(item.quantity);
+      const revenue = Number(item.lineTotal);
+      const productEntry = topProductsMap.get(String(item.productId)) ?? {
+        productId: String(item.productId),
+        name: String(product?.name ?? "Unavailable product"),
+        categoryName: typeof product?.categoryName === "string" ? product.categoryName : null,
+        qty: 0,
+        revenue: 0
+      };
+      productEntry.qty += qty;
+      productEntry.revenue += revenue;
+      topProductsMap.set(String(item.productId), productEntry);
+
+      const categoryKey = typeof product?.categoryId === "string" ? product.categoryId : `name:${String(product?.categoryName ?? "Uncategorized")}`;
+      const categoryEntry = topCategoriesMap.get(categoryKey) ?? {
+        categoryId: typeof product?.categoryId === "string" ? product.categoryId : null,
+        name: String(product?.categoryName ?? "Uncategorized"),
+        qty: 0,
+        revenue: 0
+      };
+      categoryEntry.qty += qty;
+      categoryEntry.revenue += revenue;
+      topCategoriesMap.set(categoryKey, categoryEntry);
+    }
+
+    return {
+      salesTotal,
+      ordersCount: windowOrders.length,
+      outstandingTotal,
+      topProducts: [...topProductsMap.values()].sort((left, right) => right.revenue - left.revenue || right.qty - left.qty).slice(0, 10),
+      topCategories: [...topCategoriesMap.values()].sort((left, right) => right.revenue - left.revenue || right.qty - left.qty).slice(0, 10)
+    };
+  };
+
+  const daily = Array.from({ length: 30 }, (_, index) => {
+    const dayStart = new Date(thirtyDaysAgo);
+    dayStart.setDate(thirtyDaysAgo.getDate() + index);
+    const nextDay = new Date(dayStart);
+    nextDay.setDate(dayStart.getDate() + 1);
+    const date = dayStart.toISOString().slice(0, 10);
+
+    const paymentsTotal = payments
+      .filter((payment) => String(payment.status) === "CONFIRMED" && new Date(String(payment.paidAt)) >= dayStart && new Date(String(payment.paidAt)) < nextDay)
+      .reduce((sum, payment) => sum + Number(payment.amount), 0);
+    const ordersCount = orders.filter((order) => new Date(String(order.createdAt)) >= dayStart && new Date(String(order.createdAt)) < nextDay).length;
+    const outstandingTotal = orders.reduce((sum, order) => {
+      if (new Date(String(order.createdAt)) >= nextDay || String(order.status) === "CANCELLED") {
+        return sum;
+      }
+      const paid = payments
+        .filter((payment) => String(payment.orderId) === String(order.id) && String(payment.status) === "CONFIRMED" && new Date(String(payment.paidAt)) < nextDay)
+        .reduce((running, payment) => running + Number(payment.amount), 0);
+      const balance = Math.max(Number(order.total) - paid, 0);
+      if (!["DRAFT", "SENT", "CONFIRMED", "PARTIALLY_PAID"].includes(String(order.status)) && balance <= 0) {
+        return sum;
+      }
+      return sum + balance;
+    }, 0);
+
+    const movementTotals = movements.reduce<{ returnsQty: number; expiredQty: number; damagedQty: number }>(
+      (summary, movement) => {
+        if (String(movement.createdAt).slice(0, 10) !== date) return summary;
+        const reason = parseAdjustmentReason(String(movement.reason ?? ""));
+        if (!reason) return summary;
+        const qty = Math.abs(Number(movement.quantity));
+        if (reason === "RETURN") summary.returnsQty += qty;
+        if (reason === "EXPIRED") summary.expiredQty += qty;
+        if (reason === "DAMAGED") summary.damagedQty += qty;
+        return summary;
+      },
+      { returnsQty: 0, expiredQty: 0, damagedQty: 0 }
+    );
+
+    return {
+      date,
+      paymentsTotal,
+      ordersCount,
+      outstandingTotal,
+      returnsQty: movementTotals.returnsQty,
+      expiredQty: movementTotals.expiredQty,
+      damagedQty: movementTotals.damagedQty
+    };
+  });
+
+  const topProductsMap = new Map<string, { productId: string; name: string; categoryId: string | null; categoryName: string | null; qtySold: number; revenue: number; profit: number | null }>();
+  for (const item of orderItems) {
+    const order = orders.find((candidate) => String(candidate.id) === String(item.orderId));
+    if (!order || new Date(String(order.createdAt)) < thirtyDaysAgo || !["CONFIRMED", "PARTIALLY_PAID", "PAID"].includes(String(order.status))) {
+      continue;
+    }
+    const product = productById.get(String(item.productId));
+    const current = topProductsMap.get(String(item.productId)) ?? {
+      productId: String(item.productId),
+      name: String(product?.name ?? "Unavailable product"),
+      categoryId: typeof product?.categoryId === "string" ? product.categoryId : null,
+      categoryName: typeof product?.categoryName === "string" ? product.categoryName : null,
+      qtySold: 0,
+      revenue: 0,
+      profit: product?.cost == null ? null : 0
+    };
+    const qty = Number(item.quantity);
+    const revenue = Number(item.lineTotal);
+    current.qtySold += qty;
+    current.revenue += revenue;
+    if (current.profit != null && product?.cost != null) {
+      current.profit += revenue - Number(product.cost) * qty;
+    }
+    topProductsMap.set(String(item.productId), current);
+  }
+
+  const topCategoriesMap = new Map<string, { categoryId: string | null; name: string; qtySold: number; revenue: number; profit: number | null }>();
+  for (const item of topProductsMap.values()) {
+    const key = item.categoryId ?? `name:${item.categoryName ?? "Uncategorized"}`;
+    const current = topCategoriesMap.get(key) ?? {
+      categoryId: item.categoryId,
+      name: item.categoryName ?? "Uncategorized",
+      qtySold: 0,
+      revenue: 0,
+      profit: item.profit == null ? null : 0
+    };
+    current.qtySold += item.qtySold;
+    current.revenue += item.revenue;
+    if (current.profit != null && item.profit != null) {
+      current.profit += item.profit;
+    }
+    topCategoriesMap.set(key, current);
+  }
+
+  const returnsExpired = movements.reduce<{
+    returnsCount: number;
+    returnsValue: number;
+    expiredCount: number;
+    expiredValue: number;
+    damagedCount: number;
+    damagedValue: number;
+  }>(
+    (summary, movement) => {
+      if (new Date(String(movement.createdAt)) < thirtyDaysAgo) return summary;
+      const reason = parseAdjustmentReason(String(movement.reason ?? ""));
+      if (!reason) return summary;
+      const product = productById.get(String(movement.productId));
+      const quantity = Math.abs(Number(movement.quantity));
+      const value = quantity * Number(product?.price ?? 0);
+      if (reason === "RETURN") {
+        summary.returnsCount += quantity;
+        summary.returnsValue += value;
+      }
+      if (reason === "EXPIRED") {
+        summary.expiredCount += quantity;
+        summary.expiredValue += value;
+      }
+      if (reason === "DAMAGED") {
+        summary.damagedCount += quantity;
+        summary.damagedValue += value;
+      }
+      return summary;
+    },
+    {
+      returnsCount: 0,
+      returnsValue: 0,
+      expiredCount: 0,
+      expiredValue: 0,
+      damagedCount: 0,
+      damagedValue: 0
+    }
+  );
+
+  const lowStock = products
+    .filter((product) => Number(product.stockQty) <= Number(product.lowStockThreshold))
+    .map((product) => ({
+      productId: String(product.id),
+      name: String(product.name),
+      categoryId: typeof product.categoryId === "string" ? product.categoryId : null,
+      categoryName:
+        typeof product.categoryId === "string"
+          ? String(categoryById.get(product.categoryId)?.name ?? product.category ?? "Uncategorized")
+          : String(product.category ?? "Uncategorized"),
+      stockQty: Number(product.stockQty),
+      lowStockThreshold: Number(product.lowStockThreshold)
+    }))
+    .sort((left, right) => left.stockQty - right.stockQty || left.name.localeCompare(right.name));
+
   return {
-    salesBasis: "CONFIRMED_PAYMENTS",
-    today: {
-      salesTotal: Number(todaySales?.total ?? 0),
-      ordersCount: Number(todayOrders?.count ?? 0)
-    },
-    last7Days: {
-      salesTotal: Number(weekSales?.total ?? 0),
-      ordersCount: Number(weekOrders?.count ?? 0),
-      topProducts: topRows.map((row) => ({
-        productId: row.product_id,
-        name: row.product_name,
-        qty: Number(row.qty)
-      }))
-    },
+    salesBasis: "PAYMENTS_RECEIVED",
+    ordersCountBasis: "ORDERS_CREATED",
+    generatedAt: nowIso(),
+    today: buildWindowSummary(today),
+    last7Days: buildWindowSummary(sevenDaysAgo),
+    last30Days: buildWindowSummary(thirtyDaysAgo),
+    daily,
+    topProducts: [...topProductsMap.values()].sort((left, right) => right.revenue - left.revenue || right.qtySold - left.qtySold).slice(0, 10),
+    topCategories: [...topCategoriesMap.values()].sort((left, right) => right.revenue - left.revenue || right.qtySold - left.qtySold).slice(0, 10),
+    lowStock,
     returnsExpired
   };
 }
@@ -1340,6 +1684,38 @@ export async function applySyncChanges(
   merchantId: string,
   changes: SyncPullResponse["changes"]
 ): Promise<void> {
+  for (const row of changes.categories) {
+    await mergeRow(
+      "categories",
+      merchantId,
+      row,
+      [
+        "id",
+        "merchant_id",
+        "created_by_user_id",
+        "updated_by_user_id",
+        "name",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "version",
+        "last_modified_by_device_id"
+      ],
+      [
+        row.id,
+        row.merchantId,
+        row.createdByUserId ?? null,
+        row.updatedByUserId ?? null,
+        row.name,
+        row.createdAt,
+        row.updatedAt,
+        row.deletedAt,
+        row.version,
+        row.lastModifiedByDeviceId
+      ]
+    );
+  }
+
   for (const row of changes.products) {
     await mergeRow(
       "products",
@@ -1354,6 +1730,8 @@ export async function applySyncChanges(
         "price",
         "cost",
         "sku",
+        "category_id",
+        "category",
         "stock_qty",
         "low_stock_threshold",
         "created_at",
@@ -1371,6 +1749,8 @@ export async function applySyncChanges(
         row.price,
         row.cost,
         row.sku,
+        row.categoryId ?? null,
+        row.category ?? null,
         row.stockQty,
         row.lowStockThreshold,
         row.createdAt,
@@ -1666,6 +2046,7 @@ type LocalBackupPayload = {
   exportedAt: string;
   data: {
     settings: Record<string, unknown>[];
+    categories: Record<string, unknown>[];
     products: Record<string, unknown>[];
     customers: Record<string, unknown>[];
     orders: Record<string, unknown>[];
@@ -1690,8 +2071,9 @@ function forceMerchant(rows: Record<string, unknown>[], merchantId: string): Rec
 }
 
 export async function exportLocalBackup(merchantId: string): Promise<LocalBackupPayload> {
-  const [settings, products, customers, orders, orderItems, payments, stockMovements, featureFlags] = await Promise.all([
+  const [settings, categories, products, customers, orders, orderItems, payments, stockMovements, featureFlags] = await Promise.all([
     selectAsCamel("SELECT * FROM settings WHERE merchant_id = ? AND deleted_at IS NULL;", [merchantId]),
+    selectAsCamel("SELECT * FROM categories WHERE merchant_id = ? AND deleted_at IS NULL;", [merchantId]),
     selectAsCamel("SELECT * FROM products WHERE merchant_id = ? AND deleted_at IS NULL;", [merchantId]),
     selectAsCamel("SELECT * FROM customers WHERE merchant_id = ? AND deleted_at IS NULL;", [merchantId]),
     selectAsCamel("SELECT * FROM orders WHERE merchant_id = ? AND deleted_at IS NULL;", [merchantId]),
@@ -1706,6 +2088,7 @@ export async function exportLocalBackup(merchantId: string): Promise<LocalBackup
     exportedAt: nowIso(),
     data: {
       settings,
+      categories,
       products,
       customers,
       orders,
@@ -1722,6 +2105,7 @@ export async function importLocalBackup(context: SessionContext, backup: Record<
 
   const changes: SyncPullResponse["changes"] = {
     branches: [],
+    categories: forceMerchant(Array.isArray(data.categories) ? (data.categories as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["categories"],
     products: forceMerchant(Array.isArray(data.products) ? (data.products as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["products"],
     productStocks: [],
     customers: forceMerchant(Array.isArray(data.customers) ? (data.customers as Record<string, unknown>[]) : [], context.merchantId) as SyncPullResponse["changes"]["customers"],
