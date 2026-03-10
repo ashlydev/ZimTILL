@@ -139,6 +139,9 @@ export type Order = SyncBaseEntity & {
   customerPhone?: string | null;
   confirmedAt?: string | null;
   customer?: Customer | null;
+  customerLabel?: string;
+  paidTotal?: number;
+  balance?: number;
   delivery?: Delivery | null;
 };
 

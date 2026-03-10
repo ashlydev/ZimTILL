@@ -172,7 +172,7 @@ export function OrderCreatePage() {
         <Card subtitle="Select customer and add products" title="Order Setup">
           <div className="form-grid">
             <Select label="Customer (optional)" onChange={(event) => setSelectedCustomer(event.target.value)} value={selectedCustomer}>
-              <option value="">Walk-in customer</option>
+              <option value="">Walk-in Customer</option>
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>
                   {customer.name}

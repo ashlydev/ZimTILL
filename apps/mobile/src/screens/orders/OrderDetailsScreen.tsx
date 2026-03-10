@@ -109,6 +109,7 @@ export function OrderDetailsScreen({ route, navigation }: Props) {
 
       <Card>
         <Text style={styles.sectionTitle}>Totals</Text>
+        <Text style={styles.meta}>Customer: {String(order.customerName ?? "Walk-in Customer")}</Text>
         <Text style={styles.meta}>Subtotal: {formatMoney(Number(order.subtotal))}</Text>
         <Text style={styles.meta}>Discount: {formatMoney(Number(order.discountAmount))}</Text>
         <Text style={styles.meta}>Total: {formatMoney(Number(order.total))}</Text>

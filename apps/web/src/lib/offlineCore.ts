@@ -302,7 +302,7 @@ function requireSessionContext(): OfflineSessionContext {
     userId: snapshot.user.id,
     deviceId: getDeviceId(),
     activeBranchId: snapshot.activeBranchId ?? null,
-    businessName: snapshot.merchant.name ?? "Novoriq Stock Plattform"
+    businessName: snapshot.merchant.name ?? "ZimTill"
   };
 }
 
@@ -839,11 +839,18 @@ export async function deleteCustomerLocal(customerId: string) {
 
 export async function listOrdersLocal(search = "") {
   const { merchantId, activeBranchId } = requireSessionContext();
-  const [orders, customers] = await Promise.all([
+  const [orders, customers, payments] = await Promise.all([
     listStoreRows<Order>("orders", merchantId),
-    listStoreRows<Customer>("customers", merchantId)
+    listStoreRows<Customer>("customers", merchantId),
+    listStoreRows<Payment>("payments", merchantId)
   ]);
   const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+  const paidByOrderId = new Map<string, number>();
+
+  for (const payment of payments) {
+    if (payment.status !== "CONFIRMED") continue;
+    paidByOrderId.set(payment.orderId, (paidByOrderId.get(payment.orderId) ?? 0) + Number(payment.amount));
+  }
 
   return orders
     .filter((order) => !activeBranchId || order.branchId === activeBranchId)
@@ -854,7 +861,10 @@ export async function listOrdersLocal(search = "") {
     })
     .map((order) => ({
       ...order,
-      customer: order.customerId ? customerById.get(order.customerId) ?? null : null
+      customer: order.customerId ? customerById.get(order.customerId) ?? null : null,
+      customerLabel: order.customerId ? customerById.get(order.customerId)?.name ?? order.customerName ?? "Walk-in Customer" : "Walk-in Customer",
+      paidTotal: paidByOrderId.get(order.id) ?? 0,
+      balance: Math.max(Number(order.total) - (paidByOrderId.get(order.id) ?? 0), 0)
     }));
 }
 

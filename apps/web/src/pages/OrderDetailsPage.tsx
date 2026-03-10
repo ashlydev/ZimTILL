@@ -309,7 +309,7 @@ export function OrderDetailsPage() {
           </div>
           <div>
             <p className="summary-label">Customer</p>
-            <p>{order.customer?.name || "Walk-in"}</p>
+            <p>{order.customer?.name || order.customerName || "Walk-in Customer"}</p>
           </div>
           <div>
             <p className="summary-label">Order Total</p>

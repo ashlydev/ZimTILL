@@ -1,4 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { findFirst } = vi.hoisted(() => ({
+  findFirst: vi.fn()
+}));
+
+vi.mock("../lib/prisma", () => ({
+  prisma: {
+    subscription: {
+      findFirst
+    }
+  }
+}));
+
 import { requirePermission } from "../middleware/permissions";
 
 type UserShape = {
@@ -11,7 +24,7 @@ type UserShape = {
   platformAccess: boolean;
 };
 
-function runMiddleware(role: UserShape["role"], permission: Parameters<typeof requirePermission>[0]) {
+async function runMiddleware(role: UserShape["role"], permission: Parameters<typeof requirePermission>[0]) {
   const middleware = requirePermission(permission);
   const json = vi.fn();
   const res = {
@@ -19,7 +32,7 @@ function runMiddleware(role: UserShape["role"], permission: Parameters<typeof re
   };
   const next = vi.fn();
 
-  middleware(
+  await middleware(
     {
       user: {
         role,
@@ -39,16 +52,24 @@ function runMiddleware(role: UserShape["role"], permission: Parameters<typeof re
 }
 
 describe("permission middleware", () => {
-  it("blocks a cashier from product write routes", () => {
-    const result = runMiddleware("CASHIER", "products.write");
-
-    expect(result.next).not.toHaveBeenCalled();
-    expect(result.res.status).toHaveBeenCalledWith(403);
-    expect(result.json).toHaveBeenCalledWith({ message: "Forbidden: missing permission" });
+  beforeEach(() => {
+    findFirst.mockReset();
+    findFirst.mockResolvedValue({
+      status: "ACTIVE",
+      billingPeriodEnd: new Date(Date.now() + 86_400_000),
+      plan: null
+    });
   });
 
-  it("allows an owner through billing routes", () => {
-    const result = runMiddleware("OWNER", "billing.manage");
+  it("allows a cashier through product write routes", async () => {
+    const result = await runMiddleware("CASHIER", "products.write");
+
+    expect(result.next).toHaveBeenCalledOnce();
+    expect(result.res.status).not.toHaveBeenCalled();
+  });
+
+  it("allows an owner through billing routes", async () => {
+    const result = await runMiddleware("OWNER", "billing.manage");
 
     expect(result.next).toHaveBeenCalledOnce();
     expect(result.res.status).not.toHaveBeenCalled();

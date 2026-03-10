@@ -32,7 +32,7 @@ const orderColumns: Array<TableColumn<Order>> = [
   {
     key: "customer",
     header: "Customer",
-    render: (order) => order.customer?.name || "Walk-in"
+    render: (order) => order.customer?.name || order.customerName || "Walk-in Customer"
   },
   {
     key: "status",
@@ -40,9 +40,19 @@ const orderColumns: Array<TableColumn<Order>> = [
     render: (order) => <span className={`status-badge ${toStatusClass(order.status)}`}>{formatOrderStatus(order.status)}</span>
   },
   {
+    key: "paid",
+    header: "Paid",
+    render: (order) => formatMoney(Number(order.paidTotal ?? 0))
+  },
+  {
     key: "total",
     header: "Total",
     render: (order) => formatMoney(Number(order.total))
+  },
+  {
+    key: "balance",
+    header: "Balance",
+    render: (order) => formatMoney(Number(order.balance ?? Number(order.total)))
   },
   {
     key: "updated",
@@ -141,8 +151,10 @@ export function OrdersPage() {
                   }
                   badge={<span className={`status-badge ${toStatusClass(order.status)}`}>{formatOrderStatus(order.status)}</span>}
                   fields={[
-                    { label: "Customer", value: order.customer?.name || "Walk-in" },
+                    { label: "Customer", value: order.customer?.name || order.customerName || "Walk-in Customer" },
+                    { label: "Paid", value: formatMoney(Number(order.paidTotal ?? 0)) },
                     { label: "Total", value: formatMoney(Number(order.total)) },
+                    { label: "Balance", value: formatMoney(Number(order.balance ?? Number(order.total))) },
                     { label: "Updated", value: formatDateTime(order.updatedAt) }
                   ]}
                   subtitle="Order"

@@ -130,6 +130,7 @@ const rolePermissions: Record<AuthTokenPayload["role"], Set<AppPermission>> = {
   ]),
   CASHIER: new Set([
     "products.read",
+    "products.write",
     "customers.read",
     "orders.read",
     "orders.write",

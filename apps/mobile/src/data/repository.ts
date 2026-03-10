@@ -96,6 +96,27 @@ type LocalProductRow = Record<string, unknown> & {
   lowStockThreshold?: number;
 };
 
+type SettingsRowInput = {
+  id: string;
+  merchantId: string;
+  createdByUserId?: string | null;
+  updatedByUserId?: string | null;
+  businessName: string;
+  currencyCode: "USD" | "ZWL";
+  currencySymbol: string;
+  paymentInstructions: string;
+  whatsappTemplate: string;
+  supportPhone?: string | null;
+  supportEmail?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  version: number;
+  lastModifiedByDeviceId: string;
+};
+
+const settingsInitLocks = new Map<string, Promise<Record<string, unknown>>>();
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -141,6 +162,141 @@ function productNotFoundError() {
 
 function insufficientStockError(productName: string, available: number) {
   return new Error(`Insufficient stock for ${productName}. Only ${available} left.`);
+}
+
+function normalizeSettingsMerchantId(merchantId: string | null | undefined): string {
+  const value = String(merchantId ?? "").trim();
+  if (!value) {
+    throw new Error("Missing merchant id for settings.");
+  }
+  return value;
+}
+
+async function repairSettingsRows(db: Awaited<ReturnType<typeof getDb>>, merchantId: string): Promise<void> {
+  const rows = await db.getAllAsync<{ id: string }>(
+    "SELECT id FROM settings WHERE merchant_id = ? ORDER BY updated_at DESC, created_at DESC;",
+    [merchantId]
+  );
+
+  if (rows.length <= 1) {
+    return;
+  }
+
+  const staleIds = rows.slice(1).map((row) => row.id);
+  if (staleIds.length === 0) {
+    return;
+  }
+
+  const placeholders = staleIds.map(() => "?").join(",");
+  await db.runAsync(`DELETE FROM settings WHERE id IN (${placeholders});`, staleIds as any[]);
+}
+
+async function selectSettingsRow(db: Awaited<ReturnType<typeof getDb>>, merchantId: string): Promise<Record<string, unknown> | null> {
+  const row = await db.getFirstAsync<Record<string, unknown>>(
+    "SELECT * FROM settings WHERE merchant_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC, created_at DESC LIMIT 1;",
+    [merchantId]
+  );
+
+  return row ? toCamel(row) : null;
+}
+
+async function upsertSettingsRow(input: SettingsRowInput): Promise<void> {
+  const db = await getDb();
+  const merchantId = normalizeSettingsMerchantId(input.merchantId);
+  await repairSettingsRows(db, merchantId);
+  await db.runAsync(
+    `INSERT INTO settings (
+      id, merchant_id, created_by_user_id, updated_by_user_id, business_name, currency_code, currency_symbol, payment_instructions,
+      whatsapp_template, support_phone, support_email, created_at, updated_at, deleted_at,
+      version, last_modified_by_device_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(merchant_id) DO UPDATE SET
+      id = excluded.id,
+      created_by_user_id = excluded.created_by_user_id,
+      updated_by_user_id = excluded.updated_by_user_id,
+      business_name = excluded.business_name,
+      currency_code = excluded.currency_code,
+      currency_symbol = excluded.currency_symbol,
+      payment_instructions = excluded.payment_instructions,
+      whatsapp_template = excluded.whatsapp_template,
+      support_phone = excluded.support_phone,
+      support_email = excluded.support_email,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at,
+      deleted_at = excluded.deleted_at,
+      version = excluded.version,
+      last_modified_by_device_id = excluded.last_modified_by_device_id;`,
+    [
+      input.id,
+      merchantId,
+      input.createdByUserId ?? null,
+      input.updatedByUserId ?? null,
+      input.businessName,
+      input.currencyCode,
+      input.currencySymbol,
+      input.paymentInstructions,
+      input.whatsappTemplate,
+      input.supportPhone ?? null,
+      input.supportEmail ?? null,
+      input.createdAt,
+      input.updatedAt,
+      input.deletedAt ?? null,
+      input.version,
+      input.lastModifiedByDeviceId
+    ] as any[]
+  );
+}
+
+async function ensureSettingsRow(merchantId: string): Promise<Record<string, unknown>> {
+  const normalizedMerchantId = normalizeSettingsMerchantId(merchantId);
+  const activeLock = settingsInitLocks.get(normalizedMerchantId);
+  if (activeLock) {
+    return activeLock;
+  }
+
+  const pending = (async () => {
+    const db = await getDb();
+    await repairSettingsRows(db, normalizedMerchantId);
+
+    const existing = await selectSettingsRow(db, normalizedMerchantId);
+    if (existing) {
+      return existing;
+    }
+
+    const now = nowIso();
+    const deviceId = await getDeviceId();
+    await upsertSettingsRow({
+      id: generateId(),
+      merchantId: normalizedMerchantId,
+      createdByUserId: null,
+      updatedByUserId: null,
+      businessName: "My Business",
+      currencyCode: "USD",
+      currencySymbol: "$",
+      paymentInstructions: "EcoCash / ZIPIT / Bank transfer / Cash",
+      whatsappTemplate:
+        "{businessName}\\nOrder #{orderNumber}\\n{items}\\nTotal: {total}\\nBalance: {balance}\\nPayment: {paymentInstructions}\\nThank you.",
+      supportPhone: "+263770000000",
+      supportEmail: "support@example.com",
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+      version: 1,
+      lastModifiedByDeviceId: deviceId
+    });
+
+    const created = await selectSettingsRow(db, normalizedMerchantId);
+    if (!created) {
+      throw new Error("Failed to initialize local settings.");
+    }
+
+    return created;
+  })().finally(() => {
+    settingsInitLocks.delete(normalizedMerchantId);
+  });
+
+  settingsInitLocks.set(normalizedMerchantId, pending);
+  return pending;
 }
 
 async function enqueue(
@@ -653,19 +809,39 @@ async function getOrderById(merchantId: string, orderId: string): Promise<Record
 
 export async function listOrders(merchantId: string, search = ""): Promise<Record<string, unknown>[]> {
   const db = await getDb();
-  const rows = await db.getAllAsync<Record<string, unknown>>(
-    `SELECT o.*,
-            c.name as customer_name
-     FROM orders o
-     LEFT JOIN customers c ON c.id = o.customer_id
-     WHERE o.merchant_id = ?
-       AND o.deleted_at IS NULL
-       AND (? = '' OR LOWER(o.order_number) LIKE '%' || LOWER(?) || '%' OR LOWER(COALESCE(c.name, '')) LIKE '%' || LOWER(?) || '%')
-     ORDER BY o.updated_at DESC;`,
-    [merchantId, search, search, search]
-  );
+  const [rows, paymentRows] = await Promise.all([
+    db.getAllAsync<Record<string, unknown>>(
+      `SELECT o.*,
+              c.name as customer_name
+       FROM orders o
+       LEFT JOIN customers c ON c.id = o.customer_id
+       WHERE o.merchant_id = ?
+         AND o.deleted_at IS NULL
+         AND (? = '' OR LOWER(o.order_number) LIKE '%' || LOWER(?) || '%' OR LOWER(COALESCE(c.name, '')) LIKE '%' || LOWER(?) || '%')
+       ORDER BY o.updated_at DESC;`,
+      [merchantId, search, search, search]
+    ),
+    db.getAllAsync<{ order_id: string; paid_total: number }>(
+      `SELECT order_id, COALESCE(SUM(amount), 0) as paid_total
+       FROM payments
+       WHERE merchant_id = ? AND deleted_at IS NULL AND status = 'CONFIRMED'
+       GROUP BY order_id;`,
+      [merchantId]
+    )
+  ]);
 
-  return rows.map((row) => toCamel(row));
+  const paidByOrderId = new Map(paymentRows.map((row) => [row.order_id, Number(row.paid_total ?? 0)]));
+
+  return rows.map((row) => {
+    const order = toCamel(row);
+    const paidTotal = paidByOrderId.get(String(order.id)) ?? 0;
+    return {
+      ...order,
+      customerLabel: String(order.customerName ?? "Walk-in Customer"),
+      paidTotal,
+      balance: Math.max(Number(order.total ?? 0) - paidTotal, 0)
+    };
+  });
 }
 
 export async function createOrder(context: SessionContext, input: CreateOrderInput): Promise<Record<string, unknown>> {
@@ -1456,64 +1632,7 @@ export async function getReports(merchantId: string): Promise<{
 }
 
 export async function getSettings(merchantId: string): Promise<Record<string, unknown>> {
-  const db = await getDb();
-  const deviceId = await getDeviceId();
-  const existing = await db.getFirstAsync<Record<string, unknown>>(
-    "SELECT * FROM settings WHERE merchant_id = ? AND deleted_at IS NULL;",
-    [merchantId]
-  );
-
-  if (existing) {
-    return toCamel(existing);
-  }
-
-  const now = nowIso();
-  const setting = {
-    id: generateId(),
-    merchant_id: merchantId,
-    created_by_user_id: null,
-    updated_by_user_id: null,
-    business_name: "My Business",
-    currency_code: "USD",
-    currency_symbol: "$",
-    payment_instructions: "EcoCash / ZIPIT / Bank transfer / Cash",
-    whatsapp_template:
-      "{businessName}\\nOrder #{orderNumber}\\n{items}\\nTotal: {total}\\nBalance: {balance}\\nPayment: {paymentInstructions}\\nThank you.",
-    support_phone: "+263770000000",
-    support_email: "support@example.com",
-    created_at: now,
-    updated_at: now,
-    deleted_at: null,
-    version: 1,
-    last_modified_by_device_id: deviceId
-  };
-
-  await db.runAsync(
-    `INSERT INTO settings (
-      id, merchant_id, created_by_user_id, updated_by_user_id, business_name, currency_code, currency_symbol, payment_instructions,
-      whatsapp_template, support_phone, support_email, created_at, updated_at, deleted_at,
-      version, last_modified_by_device_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?);`,
-    [
-      setting.id,
-      setting.merchant_id,
-      setting.created_by_user_id,
-      setting.updated_by_user_id,
-      setting.business_name,
-      setting.currency_code,
-      setting.currency_symbol,
-      setting.payment_instructions,
-      setting.whatsapp_template,
-      setting.support_phone,
-      setting.support_email,
-      setting.created_at,
-      setting.updated_at,
-      setting.version,
-      setting.last_modified_by_device_id
-    ]
-  );
-
-  return toCamel(setting);
+  return ensureSettingsRow(merchantId);
 }
 
 export async function saveSettings(
@@ -1528,49 +1647,42 @@ export async function saveSettings(
     supportEmail: string | null;
   }>
 ): Promise<Record<string, unknown>> {
-  const db = await getDb();
   const current = await getSettings(context.merchantId);
+  const createdAt = typeof current.createdAt === "string" ? current.createdAt : nowIso();
+  const deletedAt = typeof current.deletedAt === "string" ? current.deletedAt : null;
+  const createdByUserId = typeof current.createdByUserId === "string" ? current.createdByUserId : context.userId;
   const next = {
     ...current,
     ...input,
     id: String(current.id),
     merchantId: context.merchantId,
-    createdByUserId: current.createdByUserId ?? context.userId,
+    createdAt,
+    deletedAt,
+    createdByUserId,
     updatedByUserId: context.userId,
     updatedAt: nowIso(),
     version: Number(current.version) + 1,
     lastModifiedByDeviceId: context.deviceId
   };
 
-  await db.runAsync(
-    `UPDATE settings SET
-      business_name = ?,
-      currency_code = ?,
-      currency_symbol = ?,
-      payment_instructions = ?,
-      whatsapp_template = ?,
-      support_phone = ?,
-      support_email = ?,
-      updated_by_user_id = ?,
-      updated_at = ?,
-      version = ?,
-      last_modified_by_device_id = ?
-     WHERE merchant_id = ?;`,
-    [
-      String(next.businessName ?? ""),
-      (next.currencyCode === "ZWL" ? "ZWL" : "USD") as "USD" | "ZWL",
-      String(next.currencySymbol ?? "$"),
-      String(next.paymentInstructions ?? ""),
-      String(next.whatsappTemplate ?? ""),
-      next.supportPhone ?? null,
-      next.supportEmail ?? null,
-      next.updatedByUserId ?? null,
-      String(next.updatedAt),
-      next.version,
-      String(next.lastModifiedByDeviceId),
-      context.merchantId
-    ] as any[]
-  );
+  await upsertSettingsRow({
+    id: String(next.id),
+    merchantId: context.merchantId,
+    createdByUserId: typeof next.createdByUserId === "string" ? next.createdByUserId : context.userId,
+    updatedByUserId: typeof next.updatedByUserId === "string" ? next.updatedByUserId : context.userId,
+    businessName: String(next.businessName ?? ""),
+    currencyCode: next.currencyCode === "ZWL" ? "ZWL" : "USD",
+    currencySymbol: String(next.currencySymbol ?? "$"),
+    paymentInstructions: String(next.paymentInstructions ?? ""),
+    whatsappTemplate: String(next.whatsappTemplate ?? ""),
+    supportPhone: typeof next.supportPhone === "string" ? next.supportPhone : next.supportPhone ?? null,
+    supportEmail: typeof next.supportEmail === "string" ? next.supportEmail : next.supportEmail ?? null,
+    createdAt: String(next.createdAt ?? nowIso()),
+    updatedAt: String(next.updatedAt),
+    deletedAt: next.deletedAt == null ? null : String(next.deletedAt),
+    version: Number(next.version),
+    lastModifiedByDeviceId: String(next.lastModifiedByDeviceId)
+  });
 
   const updated = await getSettings(context.merchantId);
   await enqueue(context, "settings", String(updated.id), "UPSERT", updated);
@@ -1678,6 +1790,41 @@ async function mergeRow(
     `INSERT INTO ${table} (${columns.join(",")}) VALUES (${placeholders}) ON CONFLICT(id) DO UPDATE SET ${updates};`,
     values as any[]
   );
+}
+
+async function mergeSettingsRow(merchantId: string, row: SyncPullResponse["changes"]["settings"][number]): Promise<void> {
+  const normalizedMerchantId = normalizeSettingsMerchantId(row.merchantId ?? merchantId);
+  const db = await getDb();
+  const existing = await db.getFirstAsync<{ updated_at: string }>(
+    "SELECT updated_at FROM settings WHERE merchant_id = ?;",
+    [normalizedMerchantId]
+  );
+
+  if (existing && new Date(existing.updated_at).getTime() > new Date(String(row.updatedAt)).getTime()) {
+    return;
+  }
+
+  await upsertSettingsRow({
+    id: String(row.id),
+    merchantId: normalizedMerchantId,
+    createdByUserId: row.createdByUserId ?? null,
+    updatedByUserId: row.updatedByUserId ?? null,
+    businessName: String(row.businessName ?? "My Business"),
+    currencyCode: row.currencyCode === "ZWL" ? "ZWL" : "USD",
+    currencySymbol: String(row.currencySymbol ?? "$"),
+    paymentInstructions: String(row.paymentInstructions ?? "EcoCash / ZIPIT / Bank transfer / Cash"),
+    whatsappTemplate:
+      typeof row.whatsappTemplate === "string" && row.whatsappTemplate.trim()
+        ? row.whatsappTemplate
+        : "{businessName}\\nOrder #{orderNumber}\\n{items}\\nTotal: {total}\\nBalance: {balance}\\nPayment: {paymentInstructions}\\nThank you.",
+    supportPhone: row.supportPhone ?? null,
+    supportEmail: row.supportEmail ?? null,
+    createdAt: String(row.createdAt),
+    updatedAt: String(row.updatedAt),
+    deletedAt: row.deletedAt ?? null,
+    version: Number(row.version ?? 1),
+    lastModifiedByDeviceId: String(row.lastModifiedByDeviceId ?? "sync")
+  });
 }
 
 export async function applySyncChanges(
@@ -1971,47 +2118,7 @@ export async function applySyncChanges(
   }
 
   for (const row of changes.settings) {
-    await mergeRow(
-      "settings",
-      merchantId,
-      row,
-      [
-        "id",
-        "merchant_id",
-        "created_by_user_id",
-        "updated_by_user_id",
-        "business_name",
-        "currency_code",
-        "currency_symbol",
-        "payment_instructions",
-        "whatsapp_template",
-        "support_phone",
-        "support_email",
-        "created_at",
-        "updated_at",
-        "deleted_at",
-        "version",
-        "last_modified_by_device_id"
-      ],
-      [
-        row.id,
-        row.merchantId,
-        row.createdByUserId ?? null,
-        row.updatedByUserId ?? null,
-        row.businessName,
-        row.currencyCode,
-        row.currencySymbol,
-        row.paymentInstructions,
-        row.whatsappTemplate,
-        row.supportPhone,
-        row.supportEmail,
-        row.createdAt,
-        row.updatedAt,
-        row.deletedAt,
-        row.version,
-        row.lastModifiedByDeviceId
-      ]
-    );
+    await mergeSettingsRow(merchantId, row);
   }
 
   const db = await getDb();

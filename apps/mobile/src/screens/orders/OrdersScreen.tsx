@@ -68,8 +68,10 @@ export function OrdersScreen() {
         renderItem={({ item }) => (
           <Card>
             <Text style={styles.itemTitle}>{String(item.orderNumber)}</Text>
-            <Text style={styles.itemMeta}>Customer: {String(item.customerName ?? "Walk-in")}</Text>
+            <Text style={styles.itemMeta}>Customer: {String(item.customerLabel ?? item.customerName ?? "Walk-in Customer")}</Text>
             <Text style={styles.itemMeta}>Total: {formatMoney(Number(item.total))}</Text>
+            <Text style={styles.itemMeta}>Paid: {formatMoney(Number(item.paidTotal ?? 0))}</Text>
+            <Text style={styles.itemMeta}>Balance: {formatMoney(Number(item.balance ?? item.total ?? 0))}</Text>
             <StatusBadge label={String(item.status)} tone={toneFromStatus(String(item.status))} />
             <AppButton
               label="View details"
