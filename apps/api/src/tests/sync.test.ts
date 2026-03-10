@@ -113,6 +113,26 @@ function samplePayment(merchantId: string, actor: Actor, orderId: string, id = r
   };
 }
 
+function sampleOrderItem(merchantId: string, actor: Actor, orderId: string, productId: string, id = randomUUID()) {
+  const now = new Date().toISOString();
+  return {
+    id,
+    merchantId,
+    orderId,
+    productId,
+    createdByUserId: actor.userId,
+    updatedByUserId: actor.userId,
+    quantity: 2,
+    unitPrice: 12.5,
+    lineTotal: 25,
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
+    version: 1,
+    lastModifiedByDeviceId: actor.deviceId
+  };
+}
+
 describe("sync service", () => {
   it("is idempotent for duplicate opId", async () => {
     const { prisma, state } = createInMemoryPrisma();
@@ -213,6 +233,91 @@ describe("sync service", () => {
     expect(pulled.changes.payments).toHaveLength(1);
     expect(pulled.changes.payments[0]?.id).toBe(payment.id);
     expect(pulled.changes.payments[0]?.createdByUserId).toBe(staff.userId);
+  });
+
+  it("sorts parent records before child order items during push", async () => {
+    const { prisma, state } = createInMemoryPrisma();
+    const actor: Actor = { merchantId: randomUUID(), userId: randomUUID(), deviceId: "device-sort" };
+    registerActor(state, actor, { role: "CASHIER", identifier: "cashier@example.com" });
+
+    const product = sampleProduct(actor.merchantId, actor);
+    const order = sampleOrder(actor.merchantId, actor);
+    const orderItem = sampleOrderItem(actor.merchantId, actor, order.id, product.id);
+
+    const result = await handleSyncPush(prisma as never, actor, {
+      operations: [
+        {
+          opId: randomUUID(),
+          entityType: "orderItem",
+          opType: "UPSERT",
+          entityId: orderItem.id,
+          payload: orderItem,
+          clientUpdatedAt: orderItem.updatedAt,
+          userId: actor.userId,
+          deviceId: actor.deviceId
+        },
+        {
+          opId: randomUUID(),
+          entityType: "order",
+          opType: "UPSERT",
+          entityId: order.id,
+          payload: order,
+          clientUpdatedAt: order.updatedAt,
+          userId: actor.userId,
+          deviceId: actor.deviceId
+        },
+        {
+          opId: randomUUID(),
+          entityType: "product",
+          opType: "UPSERT",
+          entityId: product.id,
+          payload: product,
+          clientUpdatedAt: product.updatedAt,
+          userId: actor.userId,
+          deviceId: actor.deviceId
+        }
+      ]
+    });
+
+    expect(result.rejected).toHaveLength(0);
+    expect(state.products).toHaveLength(1);
+    expect(state.orders).toHaveLength(1);
+    expect(state.orderItems).toHaveLength(1);
+    expect(state.orderItems[0]?.orderId).toBe(order.id);
+  });
+
+  it("returns a friendly rejection when an order item arrives before its order exists", async () => {
+    const { prisma, state } = createInMemoryPrisma();
+    const actor: Actor = { merchantId: randomUUID(), userId: randomUUID(), deviceId: "device-missing-order" };
+    registerActor(state, actor, { role: "CASHIER", identifier: "cashier@example.com" });
+
+    const product = sampleProduct(actor.merchantId, actor);
+    state.products.push({
+      ...product,
+      createdAt: new Date(product.createdAt),
+      updatedAt: new Date(product.updatedAt)
+    });
+
+    const orderItem = sampleOrderItem(actor.merchantId, actor, randomUUID(), product.id);
+    const result = await handleSyncPush(prisma as never, actor, {
+      operations: [
+        {
+          opId: randomUUID(),
+          entityType: "orderItem",
+          opType: "UPSERT",
+          entityId: orderItem.id,
+          payload: orderItem,
+          clientUpdatedAt: orderItem.updatedAt,
+          userId: actor.userId,
+          deviceId: actor.deviceId
+        }
+      ]
+    });
+
+    expect(result.acceptedOpIds).toHaveLength(0);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]?.reason).toBe("Order item is waiting for its order to sync first.");
+    expect(state.orderItems).toHaveLength(0);
   });
 
   it("returns only merchant-scoped data for pull", async () => {

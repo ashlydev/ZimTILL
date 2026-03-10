@@ -28,6 +28,19 @@ type SyncActorContext = {
   deviceId: string;
 };
 
+const upsertPriority: Partial<Record<SyncOperation["entityType"], number>> = {
+  settings: 0,
+  category: 1,
+  product: 2,
+  customer: 3,
+  order: 4,
+  orderItem: 5,
+  payment: 6,
+  paynowTransaction: 7,
+  stockMovement: 8,
+  featureFlag: 9
+};
+
 function dateValue(value: string | null | undefined): Date | null {
   if (!value) return null;
   return new Date(value);
@@ -96,6 +109,68 @@ function baseAuditData(existingCreatedByUserId: string | null | undefined, actor
     updatedAt: clientUpdatedAt(operation),
     lastModifiedByDeviceId: actor.deviceId
   };
+}
+
+function sortSyncOperations(operations: SyncOperation[]): SyncOperation[] {
+  return [...operations].sort((left, right) => {
+    const leftPriority = left.opType === "UPSERT" ? upsertPriority[left.entityType] ?? 100 : 1_000;
+    const rightPriority = right.opType === "UPSERT" ? upsertPriority[right.entityType] ?? 100 : 1_000;
+
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority;
+    }
+
+    return new Date(left.clientUpdatedAt).getTime() - new Date(right.clientUpdatedAt).getTime();
+  });
+}
+
+async function assertOrderItemRelations(
+  tx: Prisma.TransactionClient,
+  actor: SyncActorContext,
+  payload: ReturnType<typeof orderItemSchema.parse>
+): Promise<void> {
+  const [order, product] = await Promise.all([
+    tx.order.findFirst({
+      where: {
+        id: payload.orderId,
+        merchantId: actor.merchantId
+      }
+    }),
+    tx.product.findFirst({
+      where: {
+        id: payload.productId,
+        merchantId: actor.merchantId
+      }
+    })
+  ]);
+
+  if (!order) {
+    throw new HttpError(409, "Order item is waiting for its order to sync first.", "ORDER_NOT_READY");
+  }
+
+  if (!product) {
+    throw new HttpError(409, "Order item is waiting for its product to sync first.", "PRODUCT_NOT_READY");
+  }
+}
+
+function getSyncRejectionReason(error: unknown, operation: SyncOperation): string {
+  if (error instanceof HttpError) {
+    return error.message;
+  }
+
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+    if (operation.entityType === "orderItem") {
+      return "Order item is waiting for its order to sync first.";
+    }
+
+    if (operation.entityType === "payment") {
+      return "Payment is waiting for its order to sync first.";
+    }
+
+    return "A related record is missing. Sync will retry when its parent record is available.";
+  }
+
+  return error instanceof Error ? error.message : "Unknown sync error";
 }
 
 async function upsertEntity(
@@ -251,6 +326,7 @@ async function upsertEntity(
     case "orderItem": {
       const payload = orderItemSchema.parse(operation.payload);
       ensureMerchantScope(payload.merchantId, actor.merchantId);
+      await assertOrderItemRelations(tx, actor, payload);
 
       const existing = await tx.orderItem.findFirst({ where: { id: payload.id, merchantId: actor.merchantId } });
       if (existing && !isClientNewer(operation, existing.updatedAt)) return;
@@ -541,7 +617,7 @@ export async function handleSyncPush(
   const acceptedOpIds: string[] = [];
   const rejected: Array<{ opId: string; reason: string }> = [];
 
-  for (const operation of parsed.operations) {
+  for (const operation of sortSyncOperations(parsed.operations)) {
     const existingLog = await prisma.syncOperationLog.findUnique({
       where: {
         merchantId_opId: {
@@ -573,7 +649,7 @@ export async function handleSyncPush(
             entityType: operation.entityType,
             opType: operation.opType,
             entityId: operation.entityId,
-            payload: operation.payload,
+            payload: jsonValue(operation.payload)!,
             status: "ACCEPTED"
           }
         });
@@ -581,7 +657,7 @@ export async function handleSyncPush(
 
       acceptedOpIds.push(operation.opId);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : "Unknown sync error";
+      const reason = getSyncRejectionReason(error, operation);
       rejected.push({ opId: operation.opId, reason });
 
       await prisma.syncOperationLog.create({
@@ -591,7 +667,7 @@ export async function handleSyncPush(
           entityType: operation.entityType,
           opType: operation.opType,
           entityId: operation.entityId,
-          payload: { reason, payload: operation.payload },
+          payload: jsonValue({ reason, payload: operation.payload })!,
           status: "REJECTED"
         }
       });

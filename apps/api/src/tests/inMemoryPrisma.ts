@@ -671,6 +671,16 @@ export function createInMemoryPrisma() {
     orderItem: {
       findFirst: async ({ where, orderBy }: AnyRecord = {}) => sortRecords(filterByWhere(orderItems, where), orderBy)[0] ?? null,
       create: async ({ data }: AnyRecord) => {
+        const order = orders.find((item) => item.id === data.orderId && item.merchantId === data.merchantId);
+        if (!order) {
+          throw new Error("Foreign key constraint violated on the constraint: `OrderItem_orderId_fkey`");
+        }
+
+        const product = products.find((item) => item.id === data.productId && item.merchantId === data.merchantId);
+        if (!product) {
+          throw new Error("Foreign key constraint violated on the constraint: `OrderItem_productId_fkey`");
+        }
+
         const next = withDefaults(data);
         orderItems.push(next);
         return next;
