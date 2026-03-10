@@ -3,6 +3,8 @@ import type { AuthTokenPayload } from "../lib/token";
 import { prisma } from "../lib/prisma";
 
 export type AppPermission =
+  | "discounts.override"
+  | "sales.void"
   | "products.read"
   | "products.write"
   | "customers.read"
@@ -30,6 +32,18 @@ export type AppPermission =
   | "catalog.write"
   | "deliveries.read"
   | "deliveries.manage"
+  | "suppliers.read"
+  | "suppliers.write"
+  | "purchases.read"
+  | "purchases.write"
+  | "stocktakes.read"
+  | "stocktakes.write"
+  | "stocktakes.manage"
+  | "cashups.read"
+  | "cashups.write"
+  | "cashups.manage"
+  | "notifications.read"
+  | "notifications.manage"
   | "pricing.read"
   | "pricing.manage"
   | "admin.access"
@@ -37,6 +51,8 @@ export type AppPermission =
 
 const rolePermissions: Record<AuthTokenPayload["role"], Set<AppPermission>> = {
   OWNER: new Set([
+    "discounts.override",
+    "sales.void",
     "products.read",
     "products.write",
     "customers.read",
@@ -64,12 +80,26 @@ const rolePermissions: Record<AuthTokenPayload["role"], Set<AppPermission>> = {
     "catalog.write",
     "deliveries.read",
     "deliveries.manage",
+    "suppliers.read",
+    "suppliers.write",
+    "purchases.read",
+    "purchases.write",
+    "stocktakes.read",
+    "stocktakes.write",
+    "stocktakes.manage",
+    "cashups.read",
+    "cashups.write",
+    "cashups.manage",
+    "notifications.read",
+    "notifications.manage",
     "pricing.read",
     "pricing.manage",
     "admin.access",
     "billing.manage"
   ]),
   ADMIN: new Set([
+    "discounts.override",
+    "sales.void",
     "products.read",
     "products.write",
     "customers.read",
@@ -97,10 +127,24 @@ const rolePermissions: Record<AuthTokenPayload["role"], Set<AppPermission>> = {
     "catalog.write",
     "deliveries.read",
     "deliveries.manage",
+    "suppliers.read",
+    "suppliers.write",
+    "purchases.read",
+    "purchases.write",
+    "stocktakes.read",
+    "stocktakes.write",
+    "stocktakes.manage",
+    "cashups.read",
+    "cashups.write",
+    "cashups.manage",
+    "notifications.read",
+    "notifications.manage",
     "pricing.read",
     "admin.access"
   ]),
   MANAGER: new Set([
+    "discounts.override",
+    "sales.void",
     "products.read",
     "products.write",
     "customers.read",
@@ -126,6 +170,17 @@ const rolePermissions: Record<AuthTokenPayload["role"], Set<AppPermission>> = {
     "catalog.write",
     "deliveries.read",
     "deliveries.manage",
+    "suppliers.read",
+    "suppliers.write",
+    "purchases.read",
+    "purchases.write",
+    "stocktakes.read",
+    "stocktakes.write",
+    "stocktakes.manage",
+    "cashups.read",
+    "cashups.write",
+    "cashups.manage",
+    "notifications.read",
     "pricing.read"
   ]),
   CASHIER: new Set([
@@ -139,7 +194,10 @@ const rolePermissions: Record<AuthTokenPayload["role"], Set<AppPermission>> = {
     "payments.write",
     "reports.read",
     "branches.read",
-    "catalog.read"
+    "catalog.read",
+    "cashups.read",
+    "cashups.write",
+    "notifications.read"
   ]),
   STOCK_CONTROLLER: new Set([
     "products.read",
@@ -149,9 +207,15 @@ const rolePermissions: Record<AuthTokenPayload["role"], Set<AppPermission>> = {
     "transfers.read",
     "transfers.write",
     "branches.read",
-    "reports.read"
+    "reports.read",
+    "suppliers.read",
+    "purchases.read",
+    "purchases.write",
+    "stocktakes.read",
+    "stocktakes.write",
+    "notifications.read"
   ]),
-  DELIVERY_RIDER: new Set(["deliveries.read", "deliveries.manage"])
+  DELIVERY_RIDER: new Set(["deliveries.read", "deliveries.manage", "notifications.read"])
 };
 
 const subscriptionGuardPermissions = new Set<AppPermission>([
@@ -165,7 +229,13 @@ const subscriptionGuardPermissions = new Set<AppPermission>([
   "branches.manage",
   "transfers.write",
   "catalog.write",
-  "deliveries.manage"
+  "deliveries.manage",
+  "suppliers.write",
+  "purchases.write",
+  "stocktakes.write",
+  "stocktakes.manage",
+  "cashups.write",
+  "cashups.manage"
 ]);
 
 export function hasPermission(role: AuthTokenPayload["role"], permission: AppPermission): boolean {

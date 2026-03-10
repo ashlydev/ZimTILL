@@ -421,6 +421,193 @@ function buildReport(input: LoadedReportInput) {
   };
 }
 
+function buildProfitSummary(input: LoadedReportInput) {
+  const soldOrders = input.orders.filter((order) => SOLD_ORDER_STATUSES.has(order.status) && order.status !== "CANCELLED");
+  const soldOrderIds = new Set(soldOrders.map((order) => order.id));
+  const productsById = new Map(input.products.map((product) => [product.id, product]));
+
+  let revenue = 0;
+  let cogs = 0;
+  let missingCostCount = 0;
+  for (const item of input.orderItems) {
+    if (!soldOrderIds.has(item.orderId)) continue;
+    const product = productsById.get(item.productId);
+    revenue += toNumber(item.lineTotal);
+    if (product?.cost == null) {
+      missingCostCount += 1;
+      continue;
+    }
+    cogs += toNumber(product.cost) * toNumber(item.quantity);
+  }
+
+  const discountsGiven = soldOrders.reduce((sum, order) => sum + toNumber(order.discountAmount), 0);
+  const report = buildReport(input);
+  const returnsValue = report.returnsExpired.returnsValue;
+  const damagedLosses = report.returnsExpired.damagedValue;
+  const expiredLosses = report.returnsExpired.expiredValue;
+  const grossProfit = revenue - cogs;
+  const netStockLossImpact = damagedLosses + expiredLosses;
+  const estimatedNetProfit = grossProfit - discountsGiven - returnsValue - netStockLossImpact;
+
+  return {
+    revenue,
+    cogs,
+    grossProfit,
+    discountsGiven,
+    returnsValue,
+    damagedLosses,
+    expiredLosses,
+    netStockLossImpact,
+    estimatedNetProfit,
+    missingCostCount
+  };
+}
+
+async function buildOwnerControl(
+  merchantId: string,
+  branchId: string | undefined,
+  input: LoadedReportInput
+) {
+  const [users, cashUps, recentAudits] = await Promise.all([
+    prisma.user.findMany({
+      where: { merchantId, deletedAt: null, isActive: true },
+      select: { id: true, identifier: true, role: true }
+    }),
+    prisma.cashUpSession.findMany({
+      where: {
+        merchantId,
+        ...(branchId ? { branchId } : {}),
+        deletedAt: null,
+        openedAt: { gte: input.from, lte: input.to }
+      },
+      include: {
+        user: { select: { id: true, identifier: true, role: true } },
+        branch: { select: { id: true, name: true } }
+      },
+      orderBy: { openedAt: "desc" }
+    }),
+    prisma.auditLog.findMany({
+      where: {
+        merchantId,
+        ...(branchId ? { branchId } : {}),
+        createdAt: { gte: input.from, lte: input.to },
+        action: { in: ["order.cancel", "order.update", "stocktake.finalize", "cashup.submit"] }
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20
+    })
+  ]);
+
+  const userById = new Map(users.map((user) => [user.id, user]));
+  const branchIds = [...new Set(input.orders.map((order) => order.branchId).filter(Boolean))] as string[];
+  const branches = branchIds.length
+    ? await prisma.branch.findMany({ where: { id: { in: branchIds }, merchantId, deletedAt: null }, select: { id: true, name: true } })
+    : [];
+  const branchById = new Map(branches.map((branch) => [branch.id, branch.name]));
+
+  const paymentsByOrderId = new Map<string, number>();
+  for (const payment of input.payments) {
+    paymentsByOrderId.set(payment.orderId, (paymentsByOrderId.get(payment.orderId) ?? 0) + toNumber(payment.amount));
+  }
+
+  const salesByCashierMap = new Map<string, { userId: string; identifier: string; ordersCount: number; salesTotal: number; paidTotal: number }>();
+  for (const order of input.orders) {
+    const userId = order.createdByUserId ?? "unknown";
+    const key = userId;
+    const actor = userById.get(userId);
+    const current = salesByCashierMap.get(key) ?? {
+      userId,
+      identifier: actor?.identifier ?? "Unknown cashier",
+      ordersCount: 0,
+      salesTotal: 0,
+      paidTotal: 0
+    };
+    current.ordersCount += 1;
+    current.salesTotal += toNumber(order.total);
+    current.paidTotal += paymentsByOrderId.get(order.id) ?? 0;
+    salesByCashierMap.set(key, current);
+  }
+
+  const salesByBranchMap = new Map<string, { branchId: string | null; name: string; ordersCount: number; salesTotal: number; paidTotal: number }>();
+  for (const order of input.orders) {
+    const key = order.branchId ?? "unassigned";
+    const current = salesByBranchMap.get(key) ?? {
+      branchId: order.branchId ?? null,
+      name: order.branchId ? branchById.get(order.branchId) ?? "Unknown branch" : "No branch",
+      ordersCount: 0,
+      salesTotal: 0,
+      paidTotal: 0
+    };
+    current.ordersCount += 1;
+    current.salesTotal += toNumber(order.total);
+    current.paidTotal += paymentsByOrderId.get(order.id) ?? 0;
+    salesByBranchMap.set(key, current);
+  }
+
+  const recentLosses = input.movements
+    .filter((movement) => parseReason(movement.reason) != null)
+    .slice(-12)
+    .reverse()
+    .map((movement) => ({
+      id: movement.id,
+      createdAt: movement.createdAt,
+      productId: movement.productId,
+      reason: parseReason(movement.reason),
+      quantity: Math.abs(toNumber(movement.quantity))
+    }));
+
+  const suspiciousActivity = [
+    ...input.orders
+      .filter((order) => order.status === "CANCELLED" || toNumber(order.discountAmount) > 0)
+      .slice(-12)
+      .map((order) => ({
+        id: order.id,
+        createdAt: order.updatedAt,
+        title: order.status === "CANCELLED" ? "Sale voided" : "Discount applied",
+        detail:
+          order.status === "CANCELLED"
+            ? `${order.orderNumber} was voided by ${userById.get(order.updatedByUserId ?? order.createdByUserId ?? "")?.identifier ?? "staff"}`
+            : `${order.orderNumber} had ${toNumber(order.discountAmount).toFixed(2)} discount`
+      })),
+    ...recentAudits.map((audit) => ({
+      id: audit.id,
+      createdAt: audit.createdAt,
+      title: audit.action,
+      detail: audit.entityType
+    }))
+  ]
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .slice(0, 12);
+
+  const expectedCash = cashUps.reduce((sum, item) => sum + toNumber(item.expectedCash), 0);
+  const countedCash = cashUps.reduce((sum, item) => sum + toNumber(item.countedCash), 0);
+  const cashVariance = cashUps.reduce((sum, item) => sum + toNumber(item.variance), 0);
+
+  return {
+    salesByCashier: [...salesByCashierMap.values()].sort((left, right) => right.salesTotal - left.salesTotal),
+    salesByBranch: [...salesByBranchMap.values()].sort((left, right) => right.salesTotal - left.salesTotal),
+    expectedCash,
+    countedCash,
+    cashVariance,
+    cashUps: cashUps.map((item) => ({
+      id: item.id,
+      status: item.status,
+      openingFloat: toNumber(item.openingFloat),
+      expectedCash: toNumber(item.expectedCash),
+      countedCash: toNumber(item.countedCash),
+      variance: toNumber(item.variance),
+      openedAt: item.openedAt,
+      submittedAt: item.submittedAt,
+      user: item.user,
+      branch: item.branch
+    })),
+    lowStock: buildReport(input).lowStock.slice(0, 10),
+    topProducts: buildReport(input).last7Days.topProducts.slice(0, 6),
+    recentLosses,
+    suspiciousActivity
+  };
+}
+
 export const reportsRouter = Router();
 reportsRouter.use(requireAuth);
 
@@ -469,5 +656,29 @@ reportsRouter.get(
     const window = buildReportWindow(req.query as Record<string, unknown>);
     const input = await loadReportInput(merchantId, branchId, window.from, window.to);
     res.json(toPlain(buildReport(input).topCategories));
+  })
+);
+
+reportsRouter.get(
+  "/profit",
+  requirePermission("reports.read"),
+  asyncHandler(async (req, res) => {
+    const merchantId = req.user!.merchantId;
+    const branchId = typeof req.query.branchId === "string" ? req.query.branchId : req.user!.branchId ?? undefined;
+    const window = buildReportWindow(req.query as Record<string, unknown>);
+    const input = await loadReportInput(merchantId, branchId, window.from, window.to);
+    res.json(toPlain(buildProfitSummary(input)));
+  })
+);
+
+reportsRouter.get(
+  "/owner-control",
+  requirePermission("reports.read"),
+  asyncHandler(async (req, res) => {
+    const merchantId = req.user!.merchantId;
+    const branchId = typeof req.query.branchId === "string" ? req.query.branchId : req.user!.branchId ?? undefined;
+    const window = buildReportWindow({ ...req.query, days: req.query.days ?? "30" });
+    const input = await loadReportInput(merchantId, branchId, window.from, window.to);
+    res.json(toPlain(await buildOwnerControl(merchantId, branchId, input)));
   })
 );

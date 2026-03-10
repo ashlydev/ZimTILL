@@ -4,11 +4,12 @@ import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncHandler, HttpError } from "../../lib/http";
 import { requireAuth } from "../../middleware/auth";
-import { requirePermission } from "../../middleware/permissions";
+import { hasPermission, requirePermission } from "../../middleware/permissions";
 import { validateBody } from "../../middleware/validate";
 import { toPlain } from "../../lib/serialization";
 import { formatCurrency, updateOrderPaymentStatus } from "./order-utils";
 import { recordAudit } from "../audit/audit.service";
+import { createNotification } from "../notifications/notifications.service";
 
 function getRouteParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
@@ -28,6 +29,10 @@ const updateOrderSchema = z.object({
   discountAmount: z.number().nonnegative().optional(),
   discountPercent: z.number().min(0).max(100).optional(),
   notes: z.string().trim().max(500).nullable().optional()
+});
+
+const cancelOrderSchema = z.object({
+  reason: z.string().trim().max(240).optional()
 });
 
 function productNotFoundError(): HttpError {
@@ -131,6 +136,11 @@ ordersRouter.post(
     const customer = body.customerId
       ? await prisma.customer.findFirst({ where: { id: body.customerId, merchantId, deletedAt: null } })
       : null;
+    const requestedDiscountAmount = Number(body.discountAmount ?? 0);
+    const requestedDiscountPercent = Number(body.discountPercent ?? 0);
+    if ((requestedDiscountAmount > 0 || requestedDiscountPercent > 0) && !hasPermission(req.user!.role, "discounts.override")) {
+      throw new HttpError(403, "A manager approval is required before applying discounts.", "DISCOUNT_OVERRIDE_REQUIRED");
+    }
     const { subtotal, discountAmount, discountPercent, total } = calculateOrderTotals(items, byId, body.discountAmount, body.discountPercent);
 
     const orderId = randomUUID();
@@ -429,13 +439,26 @@ ordersRouter.post(
       metadata: { status: confirmed.status }
     });
 
+    await createNotification(prisma, {
+      merchantId,
+      branchId: confirmed.branchId ?? null,
+      type: "SALE_COMPLETED",
+      title: "Sale confirmed",
+      message: `${confirmed.orderNumber} confirmed for ${formatCurrency("$", Number(confirmed.total))}.`,
+      entityType: "Order",
+      entityId: confirmed.id,
+      severity: "success",
+      visibility: "MANAGEMENT"
+    });
+
     res.json({ order: toPlain(confirmed) });
   })
 );
 
 ordersRouter.post(
   "/:id/cancel",
-  requirePermission("orders.manage"),
+  requirePermission("sales.void"),
+  validateBody(cancelOrderSchema),
   asyncHandler(async (req, res) => {
     const id = getRouteParam(req.params.id);
     const merchantId = req.user!.merchantId;
@@ -455,12 +478,14 @@ ordersRouter.post(
 
     const wasConfirmed = ["CONFIRMED", "PARTIALLY_PAID", "PAID"].includes(order.status);
     const now = new Date();
+    const reason = ((req.body as z.infer<typeof cancelOrderSchema> | undefined)?.reason ?? "").trim();
 
     const cancelled = await prisma.$transaction(async (tx) => {
       const next = await tx.order.update({
         where: { id: order.id },
         data: {
           status: "CANCELLED",
+          notes: reason ? `${order.notes ?? ""}\nVoid reason: ${reason}`.trim() : order.notes,
           updatedAt: now,
           updatedByUserId: req.user!.userId,
           version: { increment: 1 },
@@ -533,7 +558,19 @@ ordersRouter.post(
       action: "order.cancel",
       entityType: "Order",
       entityId: cancelled.id,
-      metadata: { status: cancelled.status }
+      metadata: { status: cancelled.status, reason: reason || null }
+    });
+
+    await createNotification(prisma, {
+      merchantId,
+      branchId: cancelled.branchId ?? null,
+      type: "SUSPICIOUS_ACTIVITY",
+      title: "Sale voided",
+      message: `${cancelled.orderNumber} was voided${reason ? `: ${reason}` : ""}.`,
+      entityType: "Order",
+      entityId: cancelled.id,
+      severity: "warning",
+      visibility: "MANAGEMENT"
     });
 
     res.json({ order: toPlain(cancelled) });

@@ -18,6 +18,11 @@ import { deliveriesRouter } from "../modules/deliveries/deliveries.routes";
 import { catalogRouter } from "../modules/catalog/catalog.routes";
 import { subscriptionsRouter } from "../modules/subscriptions/subscriptions.routes";
 import { adminRouter } from "../modules/admin/admin.routes";
+import { suppliersRouter } from "../modules/suppliers/suppliers.routes";
+import { purchasesRouter } from "../modules/purchases/purchases.routes";
+import { stockTakesRouter } from "../modules/stock-takes/stock-takes.routes";
+import { cashUpsRouter } from "../modules/cash-ups/cash-ups.routes";
+import { notificationsRouter } from "../modules/notifications/notifications.routes";
 
 export const apiRouter = Router();
 
@@ -36,6 +41,11 @@ apiRouter.use("/deliveries", deliveriesRouter);
 apiRouter.use("/catalog", catalogRouter);
 apiRouter.use("/settings", settingsRouter);
 apiRouter.use("/reports", reportsRouter);
+apiRouter.use("/suppliers", suppliersRouter);
+apiRouter.use("/purchases", purchasesRouter);
+apiRouter.use("/stock-takes", stockTakesRouter);
+apiRouter.use("/cash-ups", cashUpsRouter);
+apiRouter.use("/notifications", notificationsRouter);
 apiRouter.use("/sync", syncRouter);
 apiRouter.use("/flags", flagsRouter);
 apiRouter.use("/admin", adminRouter);

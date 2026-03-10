@@ -83,6 +83,38 @@ enum DeliveryStatus {
   FAILED
 }
 
+enum PurchaseStatus {
+  DRAFT
+  RECEIVED
+  CANCELLED
+}
+
+enum StockTakeStatus {
+  DRAFT
+  FINALIZED
+}
+
+enum CashUpStatus {
+  OPEN
+  SUBMITTED
+  APPROVED
+}
+
+enum NotificationType {
+  LOW_STOCK
+  OUT_OF_STOCK
+  STOCK_TAKE_COMPLETED
+  STOCK_VARIANCE
+  SALE_COMPLETED
+  CASH_UP_SUBMITTED
+  CASH_UP_VARIANCE
+  RETURN_CREATED
+  DAMAGED_CREATED
+  EXPIRED_CREATED
+  SUSPICIOUS_ACTIVITY
+  PURCHASE_RECEIVED
+}
+
 model Merchant {
   id                 String             @id @default(uuid())
   name               String
@@ -102,6 +134,13 @@ model Merchant {
   deliveries         Delivery[]
   devices            Device[]
   featureFlags       FeatureFlag[]
+  suppliers          Supplier[]
+  purchases          Purchase[]
+  purchaseItems      PurchaseItem[]
+  stockTakeSessions  StockTakeSession[]
+  stockTakeItems     StockTakeItem[]
+  cashUpSessions     CashUpSession[]
+  notifications      AppNotification[]
   orderItems         OrderItem[]
   orders             Order[]
   payments           Payment[]
@@ -194,6 +233,11 @@ model Branch {
   payments        Payment[]
   paynowTransactions PaynowTransaction[]
   productStocks   ProductStock[]
+  suppliers       Supplier[]
+  purchases       Purchase[]
+  stockTakeSessions StockTakeSession[]
+  cashUpSessions  CashUpSession[]
+  notifications   AppNotification[]
   stockMovements  StockMovement[]
   transfersFrom   StockTransfer[]  @relation("TransferFromBranch")
   transfersTo     StockTransfer[]  @relation("TransferToBranch")
@@ -260,6 +304,15 @@ model User {
   updatedSettings  Settings[]        @relation("SettingsUpdatedBy")
   createdPaynowTransactions PaynowTransaction[] @relation("PaynowTransactionCreatedBy")
   updatedPaynowTransactions PaynowTransaction[] @relation("PaynowTransactionUpdatedBy")
+  createdSuppliers Supplier[]       @relation("SupplierCreatedBy")
+  updatedSuppliers Supplier[]       @relation("SupplierUpdatedBy")
+  createdPurchases Purchase[]       @relation("PurchaseCreatedBy")
+  updatedPurchases Purchase[]       @relation("PurchaseUpdatedBy")
+  countedStockTakes StockTakeSession[] @relation("StockTakeCountedBy")
+  finalizedStockTakes StockTakeSession[] @relation("StockTakeFinalizedBy")
+  cashUpSessions CashUpSession[]    @relation("CashUpUser")
+  approvedCashUps CashUpSession[]   @relation("CashUpApprovedBy")
+  notifications  AppNotification[]
   requestedTransfers StockTransfer[] @relation("RequestedTransferBy")
   approvedTransfers StockTransfer[]  @relation("ApprovedTransferBy")
   receivedTransfers StockTransfer[]  @relation("ReceivedTransferBy")
@@ -324,6 +377,7 @@ model Category {
 
   merchant   Merchant   @relation(fields: [merchantId], references: [id])
   products   Product[]  @relation("ProductCategory")
+  stockTakeSessions StockTakeSession[]
 
   @@index([merchantId])
   @@index([merchantId, name])
@@ -359,6 +413,8 @@ model Product {
   items           OrderItem[]
   stockMovements  StockMovement[]
   productStocks   ProductStock[]
+  purchaseItems   PurchaseItem[]
+  stockTakeItems  StockTakeItem[]
   stockTransferItems StockTransferItem[]
   kitchenTicketItems KitchenTicketItem[]
 
@@ -623,6 +679,195 @@ model Delivery {
 
   @@index([merchantId])
   @@index([branchId])
+  @@index([updatedAt])
+}
+
+model Supplier {
+  id                     String   @id @default(uuid())
+  merchantId             String
+  branchId               String?
+  createdByUserId        String?
+  updatedByUserId        String?
+  name                   String
+  phone                  String?
+  email                  String?
+  notes                  String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  deletedAt              DateTime?
+  lastModifiedByDeviceId String   @default("server-supplier")
+
+  merchant      Merchant   @relation(fields: [merchantId], references: [id])
+  branch        Branch?    @relation(fields: [branchId], references: [id])
+  createdByUser User?      @relation("SupplierCreatedBy", fields: [createdByUserId], references: [id])
+  updatedByUser User?      @relation("SupplierUpdatedBy", fields: [updatedByUserId], references: [id])
+  purchases     Purchase[]
+
+  @@index([merchantId])
+  @@index([branchId])
+  @@index([updatedAt])
+}
+
+model Purchase {
+  id                     String         @id @default(uuid())
+  merchantId             String
+  branchId               String?
+  supplierId             String?
+  createdByUserId        String?
+  updatedByUserId        String?
+  status                 PurchaseStatus @default(DRAFT)
+  reference              String?
+  notes                  String?
+  totalCost              Decimal        @db.Decimal(12, 2)
+  receivedAt             DateTime?
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  deletedAt              DateTime?
+  lastModifiedByDeviceId String         @default("server-purchase")
+
+  merchant      Merchant       @relation(fields: [merchantId], references: [id])
+  branch        Branch?        @relation(fields: [branchId], references: [id])
+  supplier      Supplier?      @relation(fields: [supplierId], references: [id])
+  createdByUser User?          @relation("PurchaseCreatedBy", fields: [createdByUserId], references: [id])
+  updatedByUser User?          @relation("PurchaseUpdatedBy", fields: [updatedByUserId], references: [id])
+  items         PurchaseItem[]
+
+  @@index([merchantId])
+  @@index([branchId])
+  @@index([supplierId])
+  @@index([updatedAt])
+}
+
+model PurchaseItem {
+  id                     String   @id @default(uuid())
+  merchantId             String
+  purchaseId             String
+  productId              String
+  quantity               Decimal  @db.Decimal(12, 3)
+  unitCost               Decimal  @db.Decimal(12, 2)
+  lineTotal              Decimal  @db.Decimal(12, 2)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  deletedAt              DateTime?
+  lastModifiedByDeviceId String   @default("server-purchase-item")
+
+  merchant Merchant @relation(fields: [merchantId], references: [id])
+  purchase Purchase @relation(fields: [purchaseId], references: [id])
+  product  Product  @relation(fields: [productId], references: [id])
+
+  @@index([merchantId])
+  @@index([updatedAt])
+}
+
+model StockTakeSession {
+  id                     String          @id @default(uuid())
+  merchantId             String
+  branchId               String?
+  categoryId             String?
+  status                 StockTakeStatus @default(DRAFT)
+  name                   String
+  notes                  String?
+  countedByUserId        String?
+  finalizedByUserId      String?
+  startedAt              DateTime        @default(now())
+  finalizedAt            DateTime?
+  varianceQty            Decimal         @default(0) @db.Decimal(12, 3)
+  varianceValue          Decimal         @default(0) @db.Decimal(12, 2)
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+  deletedAt              DateTime?
+  lastModifiedByDeviceId String          @default("server-stocktake")
+
+  merchant        Merchant         @relation(fields: [merchantId], references: [id])
+  branch          Branch?          @relation(fields: [branchId], references: [id])
+  category        Category?        @relation(fields: [categoryId], references: [id])
+  countedByUser   User?            @relation("StockTakeCountedBy", fields: [countedByUserId], references: [id])
+  finalizedByUser User?            @relation("StockTakeFinalizedBy", fields: [finalizedByUserId], references: [id])
+  items           StockTakeItem[]
+
+  @@index([merchantId])
+  @@index([branchId])
+  @@index([categoryId])
+  @@index([updatedAt])
+}
+
+model StockTakeItem {
+  id                     String   @id @default(uuid())
+  merchantId             String
+  sessionId              String
+  productId              String
+  systemQty              Decimal  @db.Decimal(12, 3)
+  countedQty             Decimal  @db.Decimal(12, 3)
+  varianceQty            Decimal  @db.Decimal(12, 3)
+  varianceValue          Decimal  @db.Decimal(12, 2)
+  notes                  String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  deletedAt              DateTime?
+  lastModifiedByDeviceId String   @default("server-stocktake-item")
+
+  merchant Merchant         @relation(fields: [merchantId], references: [id])
+  session  StockTakeSession @relation(fields: [sessionId], references: [id])
+  product  Product          @relation(fields: [productId], references: [id])
+
+  @@index([merchantId])
+  @@index([updatedAt])
+}
+
+model CashUpSession {
+  id                     String       @id @default(uuid())
+  merchantId             String
+  branchId               String?
+  userId                 String
+  approvedByUserId       String?
+  status                 CashUpStatus @default(OPEN)
+  openingFloat           Decimal      @db.Decimal(12, 2)
+  expectedCash           Decimal      @default(0) @db.Decimal(12, 2)
+  countedCash            Decimal?     @db.Decimal(12, 2)
+  variance               Decimal?     @db.Decimal(12, 2)
+  notes                  String?
+  openedAt               DateTime     @default(now())
+  submittedAt            DateTime?
+  approvedAt             DateTime?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  deletedAt              DateTime?
+  lastModifiedByDeviceId String       @default("server-cashup")
+
+  merchant       Merchant @relation(fields: [merchantId], references: [id])
+  branch         Branch?  @relation(fields: [branchId], references: [id])
+  user           User     @relation("CashUpUser", fields: [userId], references: [id])
+  approvedByUser User?    @relation("CashUpApprovedBy", fields: [approvedByUserId], references: [id])
+
+  @@index([merchantId])
+  @@index([branchId])
+  @@index([updatedAt])
+}
+
+model AppNotification {
+  id         String           @id @default(uuid())
+  merchantId String
+  branchId   String?
+  userId     String?
+  type       NotificationType
+  title      String
+  message    String
+  entityType String?
+  entityId   String?
+  severity   String           @default("info")
+  visibility String           @default("MANAGEMENT")
+  isRead     Boolean          @default(false)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  deletedAt  DateTime?
+
+  merchant Merchant @relation(fields: [merchantId], references: [id])
+  branch   Branch?  @relation(fields: [branchId], references: [id])
+  user     User?    @relation(fields: [userId], references: [id])
+
+  @@index([merchantId])
+  @@index([branchId])
+  @@index([userId])
   @@index([updatedAt])
 }
 

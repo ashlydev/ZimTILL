@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response } from "express";
-import { AnyZodObject, ZodEffects, ZodError } from "zod";
+import { ZodError, ZodTypeAny } from "zod";
 
-type Schema = AnyZodObject | ZodEffects<AnyZodObject>;
+type Schema = ZodTypeAny;
 
 export function validateBody(schema: Schema) {
   return (req: Request, res: Response, next: NextFunction): void => {
