@@ -96,7 +96,7 @@ async function loadReportInput(
   from: Date,
   to: Date
 ) {
-  const [categories, products, orders, payments, movements] = await Promise.all([
+  const [categories, products, orders, payments, movements, expenses] = await Promise.all([
     prisma.category.findMany({
       where: { merchantId, deletedAt: null },
       orderBy: { name: "asc" }
@@ -132,6 +132,15 @@ async function loadReportInput(
         createdAt: { gte: from, lte: to }
       },
       orderBy: { createdAt: "asc" }
+    }),
+    prisma.expense.findMany({
+      where: {
+        merchantId,
+        ...(branchId ? { branchId } : {}),
+        deletedAt: null,
+        spentAt: { gte: from, lte: to }
+      },
+      orderBy: { spentAt: "asc" }
     })
   ]);
 
@@ -158,7 +167,8 @@ async function loadReportInput(
     orders,
     payments,
     orderItems,
-    movements
+    movements,
+    expenses
   };
 }
 
@@ -447,7 +457,8 @@ function buildProfitSummary(input: LoadedReportInput) {
   const expiredLosses = report.returnsExpired.expiredValue;
   const grossProfit = revenue - cogs;
   const netStockLossImpact = damagedLosses + expiredLosses;
-  const estimatedNetProfit = grossProfit - discountsGiven - returnsValue - netStockLossImpact;
+  const expensesTotal = input.expenses.reduce((sum, expense) => sum + toNumber(expense.amount), 0);
+  const estimatedNetProfit = grossProfit - discountsGiven - returnsValue - netStockLossImpact - expensesTotal;
 
   return {
     revenue,
@@ -458,6 +469,7 @@ function buildProfitSummary(input: LoadedReportInput) {
     damagedLosses,
     expiredLosses,
     netStockLossImpact,
+    expensesTotal,
     estimatedNetProfit,
     missingCostCount
   };
@@ -586,6 +598,7 @@ async function buildOwnerControl(
   return {
     salesByCashier: [...salesByCashierMap.values()].sort((left, right) => right.salesTotal - left.salesTotal),
     salesByBranch: [...salesByBranchMap.values()].sort((left, right) => right.salesTotal - left.salesTotal),
+    expensesTotal: input.expenses.reduce((sum, expense) => sum + toNumber(expense.amount), 0),
     expectedCash,
     countedCash,
     cashVariance,
@@ -603,6 +616,16 @@ async function buildOwnerControl(
     })),
     lowStock: buildReport(input).lowStock.slice(0, 10),
     topProducts: buildReport(input).last7Days.topProducts.slice(0, 6),
+    recentExpenses: input.expenses
+      .slice(-6)
+      .reverse()
+      .map((expense) => ({
+        id: expense.id,
+        title: expense.title,
+        category: expense.category,
+        amount: toNumber(expense.amount),
+        spentAt: expense.spentAt
+      })),
     recentLosses,
     suspiciousActivity
   };

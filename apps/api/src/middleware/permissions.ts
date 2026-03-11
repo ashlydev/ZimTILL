@@ -36,6 +36,8 @@ export type AppPermission =
   | "suppliers.write"
   | "purchases.read"
   | "purchases.write"
+  | "expenses.read"
+  | "expenses.write"
   | "stocktakes.read"
   | "stocktakes.write"
   | "stocktakes.manage"
@@ -84,6 +86,8 @@ const rolePermissions: Record<AuthTokenPayload["role"], Set<AppPermission>> = {
     "suppliers.write",
     "purchases.read",
     "purchases.write",
+    "expenses.read",
+    "expenses.write",
     "stocktakes.read",
     "stocktakes.write",
     "stocktakes.manage",
@@ -131,6 +135,8 @@ const rolePermissions: Record<AuthTokenPayload["role"], Set<AppPermission>> = {
     "suppliers.write",
     "purchases.read",
     "purchases.write",
+    "expenses.read",
+    "expenses.write",
     "stocktakes.read",
     "stocktakes.write",
     "stocktakes.manage",
@@ -174,6 +180,8 @@ const rolePermissions: Record<AuthTokenPayload["role"], Set<AppPermission>> = {
     "suppliers.write",
     "purchases.read",
     "purchases.write",
+    "expenses.read",
+    "expenses.write",
     "stocktakes.read",
     "stocktakes.write",
     "stocktakes.manage",
@@ -195,6 +203,8 @@ const rolePermissions: Record<AuthTokenPayload["role"], Set<AppPermission>> = {
     "reports.read",
     "branches.read",
     "catalog.read",
+    "expenses.read",
+    "expenses.write",
     "cashups.read",
     "cashups.write",
     "notifications.read"
@@ -211,6 +221,7 @@ const rolePermissions: Record<AuthTokenPayload["role"], Set<AppPermission>> = {
     "suppliers.read",
     "purchases.read",
     "purchases.write",
+    "expenses.read",
     "stocktakes.read",
     "stocktakes.write",
     "notifications.read"
@@ -232,6 +243,7 @@ const subscriptionGuardPermissions = new Set<AppPermission>([
   "deliveries.manage",
   "suppliers.write",
   "purchases.write",
+  "expenses.write",
   "stocktakes.write",
   "stocktakes.manage",
   "cashups.write",

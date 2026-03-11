@@ -157,6 +157,7 @@ export function createInMemoryPrisma() {
   const payments: AnyRecord[] = [];
   const paynowTransactions: AnyRecord[] = [];
   const stockMovements: AnyRecord[] = [];
+  const expenses: AnyRecord[] = [];
   const plans: AnyRecord[] = [];
   const subscriptions: AnyRecord[] = [];
   const usageCounters: AnyRecord[] = [];
@@ -764,6 +765,21 @@ export function createInMemoryPrisma() {
         return { count: filtered.length };
       }
     },
+    expense: {
+      findFirst: async ({ where, orderBy }: AnyRecord = {}) => sortRecords(filterByWhere(expenses, where), orderBy)[0] ?? null,
+      findMany: async ({ where, orderBy }: AnyRecord = {}) => sortRecords(filterByWhere(expenses, where), orderBy),
+      create: async ({ data }: AnyRecord) => {
+        const next = withDefaults(data, { id: data.id ?? randomUUID(), createdAt: new Date(), updatedAt: new Date(), deletedAt: null });
+        expenses.push(next);
+        return next;
+      },
+      update: async ({ where, data }: AnyRecord) => {
+        const existing = expenses.find((item) => matchesWhere(item, where));
+        if (!existing) return null;
+        applyData(existing, data);
+        return existing;
+      }
+    },
     stockTransfer: {
       create: async ({ data }: AnyRecord) => {
         const next = withDefaults(data, { id: data.id ?? randomUUID(), createdAt: new Date(), updatedAt: new Date() });
@@ -839,6 +855,7 @@ export function createInMemoryPrisma() {
       payments,
       paynowTransactions,
       stockMovements,
+      expenses,
       plans,
       subscriptions,
       usageCounters,

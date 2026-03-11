@@ -135,6 +135,7 @@ model Merchant {
   devices            Device[]
   featureFlags       FeatureFlag[]
   suppliers          Supplier[]
+  expenses           Expense[]
   purchases          Purchase[]
   purchaseItems      PurchaseItem[]
   stockTakeSessions  StockTakeSession[]
@@ -234,6 +235,7 @@ model Branch {
   paynowTransactions PaynowTransaction[]
   productStocks   ProductStock[]
   suppliers       Supplier[]
+  expenses        Expense[]
   purchases       Purchase[]
   stockTakeSessions StockTakeSession[]
   cashUpSessions  CashUpSession[]
@@ -306,6 +308,8 @@ model User {
   updatedPaynowTransactions PaynowTransaction[] @relation("PaynowTransactionUpdatedBy")
   createdSuppliers Supplier[]       @relation("SupplierCreatedBy")
   updatedSuppliers Supplier[]       @relation("SupplierUpdatedBy")
+  createdExpenses  Expense[]        @relation("ExpenseCreatedBy")
+  updatedExpenses  Expense[]        @relation("ExpenseUpdatedBy")
   createdPurchases Purchase[]       @relation("PurchaseCreatedBy")
   updatedPurchases Purchase[]       @relation("PurchaseUpdatedBy")
   countedStockTakes StockTakeSession[] @relation("StockTakeCountedBy")
@@ -705,6 +709,37 @@ model Supplier {
 
   @@index([merchantId])
   @@index([branchId])
+  @@index([updatedAt])
+}
+
+model Expense {
+  id                     String        @id @default(uuid())
+  merchantId             String
+  branchId               String?
+  createdByUserId        String?
+  updatedByUserId        String?
+  title                  String
+  category               String
+  amount                 Decimal       @db.Decimal(12, 2)
+  paymentMethod          PaymentMethod @default(CASH)
+  payee                  String?
+  notes                  String?
+  spentAt                DateTime
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+  deletedAt              DateTime?
+  lastModifiedByDeviceId String        @default("server-expense")
+
+  merchant      Merchant @relation(fields: [merchantId], references: [id])
+  branch        Branch?  @relation(fields: [branchId], references: [id])
+  createdByUser User?    @relation("ExpenseCreatedBy", fields: [createdByUserId], references: [id])
+  updatedByUser User?    @relation("ExpenseUpdatedBy", fields: [updatedByUserId], references: [id])
+
+  @@index([merchantId])
+  @@index([branchId])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
+  @@index([spentAt])
   @@index([updatedAt])
 }
 

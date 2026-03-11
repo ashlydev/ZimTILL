@@ -20,6 +20,7 @@ import { subscriptionsRouter } from "../modules/subscriptions/subscriptions.rout
 import { adminRouter } from "../modules/admin/admin.routes";
 import { suppliersRouter } from "../modules/suppliers/suppliers.routes";
 import { purchasesRouter } from "../modules/purchases/purchases.routes";
+import { expensesRouter } from "../modules/expenses/expenses.routes";
 import { stockTakesRouter } from "../modules/stock-takes/stock-takes.routes";
 import { cashUpsRouter } from "../modules/cash-ups/cash-ups.routes";
 import { notificationsRouter } from "../modules/notifications/notifications.routes";
@@ -43,6 +44,7 @@ apiRouter.use("/settings", settingsRouter);
 apiRouter.use("/reports", reportsRouter);
 apiRouter.use("/suppliers", suppliersRouter);
 apiRouter.use("/purchases", purchasesRouter);
+apiRouter.use("/expenses", expensesRouter);
 apiRouter.use("/stock-takes", stockTakesRouter);
 apiRouter.use("/cash-ups", cashUpsRouter);
 apiRouter.use("/notifications", notificationsRouter);
